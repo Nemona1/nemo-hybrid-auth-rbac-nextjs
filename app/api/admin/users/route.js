@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
-import { sendRoleDecisionEmail } from '@/lib/email/sendEmail';
+import { sendRoleDecisionEmail } from '@/lib/email/sendVerificationEmail';
 
 export async function GET(request) {
   try {

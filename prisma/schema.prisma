@@ -44,6 +44,9 @@ model User {
   // Sessions
   sessions          Session[]
   
+  // Audit Logs
+  auditLogs         AuditLog[]
+  
   // Timestamps
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -60,7 +63,7 @@ model Role {
   
   users       User[]
   permissions RolePermission[]
-  roleApplications RoleApplication[] // Added missing relation
+  roleApplications RoleApplication[]
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -145,6 +148,25 @@ model SecurityLog {
   
   @@index([userId, createdAt])
   @@map("security_logs")
+}
+
+// Audit Logs for all user actions
+model AuditLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  action       String    // LOGIN, LOGOUT, ROLE_REQUEST, ROLE_APPROVE, ROLE_REJECT, PERMISSION_GRANT, PERMISSION_REVOKE
+  resourceType String    // 'user', 'role', 'permission', 'role_application', 'audit'
+  resourceId   String?
+  details      Json?     // Flexible JSON data for action details
+  ipAddress    String?
+  userAgent    String?
+  timestamp    DateTime  @default(now())
+  
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId, timestamp])
+  @@index([action, timestamp])
+  @@map("audit_logs")
 }
 
 // Session Tracking (for inactivity enforcement)

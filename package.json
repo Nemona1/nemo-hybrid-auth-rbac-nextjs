@@ -8,13 +8,19 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
+    "db:migrate": "node lib/db/migrate.js",
     "db:seed": "node prisma/seed.js",
-    "db:studio": "prisma studio"
+    "db:refresh": "node lib/db/refresh.js",
+    "db:reset": "node lib/db/reset.js",
+    "db:studio": "prisma studio",
+    "db:setup": "npm run db:migrate && npm run db:seed"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "@radix-ui/react-tooltip": "^1.1.4",
+    "axios": "^1.14.0",
     "bcryptjs": "^2.4.3",
+    "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.460.0",
     "next": "15.1.0",

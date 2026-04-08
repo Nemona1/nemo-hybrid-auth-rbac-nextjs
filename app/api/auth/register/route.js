@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validatePasswordStrength, logSecurityEvent } from '@/lib/auth/security';
-import { sendVerificationEmail } from '@/lib/email/sendEmail';
+import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
+import { validateEmailWithZeroBounce } from '@/lib/email/validateEmail';
 import crypto from 'crypto';
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { firstName, lastName, email, password } = body;
+    
+    // Get IP address for better validation
+    const ipAddress = request.headers.get('x-forwarded-for') || 
+                      request.headers.get('x-real-ip') || 
+                      '0.0.0.0';
     
     // Validate input
     if (!firstName || !lastName || !email || !password) {
@@ -21,7 +27,7 @@ export async function POST(request) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { error: 'Invalid email format' },
+        { error: 'Please enter a valid email address (e.g., name@domain.com)' },
         { status: 400 }
       );
     }
@@ -33,23 +39,59 @@ export async function POST(request) {
     
     if (existingUser) {
       return NextResponse.json(
-        { error: 'User already exists' },
+        { error: 'An account with this email already exists. Please login instead.' },
         { status: 409 }
       );
+    }
+    
+    // Validate email with ZeroBounce (checks if email actually exists)
+    console.log('[Registration] Validating email with ZeroBounce:', email);
+    const validation = await validateEmailWithZeroBounce(email, ipAddress);
+    
+    console.log('[Registration] Validation result:', {
+      valid: validation.valid,
+      shouldBlock: validation.shouldBlock,
+      status: validation.status,
+      message: validation.message
+    });
+    
+    // If email is invalid, block registration
+    if (validation.shouldBlock || !validation.valid) {
+      let errorMessage = validation.message || 'Invalid email address. Please use a valid email address.';
+      
+      // Provide more specific error messages
+      if (validation.status === 'spamtrap') {
+        errorMessage = 'This email appears to be a spam trap. Please use a different email address.';
+      } else if (validation.status === 'abuse') {
+        errorMessage = 'This email has been reported for abuse. Please use a different email address.';
+      } else if (validation.status === 'invalid') {
+        errorMessage = 'This email address does not exist or cannot receive emails. Please check and try again.';
+      }
+      
+      return NextResponse.json(
+        { error: errorMessage },
+        { status: 400 }
+      );
+    }
+    
+    // Optional: Show warning for catch-all domains but allow registration
+    if (validation.status === 'catch-all') {
+      console.log('[Registration] Warning: Catch-all domain detected for:', email);
+      // You can still allow registration but log it
     }
     
     // Validate password strength
     const passwordValidation = validatePasswordStrength(password);
     if (!passwordValidation.isValid) {
       return NextResponse.json(
-        { error: 'Password too weak', details: passwordValidation.errors },
+        { error: passwordValidation.errors[0] },
         { status: 400 }
       );
     }
     
     // Generate verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
     
     // Hash password
     const passwordHash = await hashPassword(password);
@@ -81,7 +123,7 @@ export async function POST(request) {
       return NextResponse.json(
         { 
           success: true, 
-          warning: 'User created but verification email failed. Please contact support.',
+          warning: 'Account created but verification email could not be sent. Please contact support.',
           requiresVerification: true 
         },
         { status: 201 }
@@ -91,7 +133,7 @@ export async function POST(request) {
     await logSecurityEvent({
       userId: user.id,
       action: 'USER_REGISTERED',
-      details: { email },
+      details: { email, validationStatus: validation.status },
       success: true,
       req: request
     });
@@ -99,7 +141,7 @@ export async function POST(request) {
     return NextResponse.json(
       { 
         success: true, 
-        message: 'Registration successful. Please check your email for verification link.',
+        message: 'Registration successful! Please check your email for verification link.',
         requiresVerification: true
       },
       { status: 201 }
@@ -108,7 +150,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Registration error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error. Please try again later.' },
       { status: 500 }
     );
   }

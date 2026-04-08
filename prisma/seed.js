@@ -12,8 +12,8 @@ async function main() {
   // Create system roles
   const roles = await createRoles(permissions);
   
-  // Create admin user
-  await createAdminUser(roles.ADMIN);
+  // Create users for each role
+  await createUsers(roles);
   
   console.log('✅ Seeding completed!');
 }
@@ -98,7 +98,6 @@ async function createRoles(permissions) {
       create: roleData
     });
     
-    // Assign permissions to role
     if (rolePermissions[key]) {
       for (const permId of rolePermissions[key]) {
         await prisma.rolePermission.upsert({
@@ -125,28 +124,83 @@ async function createRoles(permissions) {
   return created;
 }
 
-async function createAdminUser(adminRole) {
-  const adminEmail = 'admin@nemo-auth.com';
-  const adminPassword = 'Admin@123456';
-  
-  const hashedPassword = await bcrypt.hash(adminPassword, 12);
-  
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {},
-    create: {
-      email: adminEmail,
+async function createUsers(roles) {
+  const users = [
+    {
+      email: 'admin@nemo-auth.com',
       firstName: 'System',
       lastName: 'Administrator',
-      passwordHash: hashedPassword,
+      password: 'Admin@123456',
+      role: roles.ADMIN,
       isVerified: true,
-      applicationStatus: 'APPROVED',
-      roleId: adminRole.id
+      applicationStatus: 'APPROVED'
+    },
+    {
+      email: 'editor@nemo-auth.com',
+      firstName: 'Content',
+      lastName: 'Editor',
+      password: 'Editor@123456',
+      role: roles.EDITOR,
+      isVerified: true,
+      applicationStatus: 'APPROVED'
+    },
+    {
+      email: 'manager@nemo-auth.com',
+      firstName: 'Team',
+      lastName: 'Manager',
+      password: 'Manager@123456',
+      role: roles.MANAGER,
+      isVerified: true,
+      applicationStatus: 'APPROVED'
+    },
+    {
+      email: 'viewer@nemo-auth.com',
+      firstName: 'Read',
+      lastName: 'Only',
+      password: 'Viewer@123456',
+      role: roles.VIEWER,
+      isVerified: true,
+      applicationStatus: 'APPROVED'
+    },
+    {
+      email: 'pending@nemo-auth.com',
+      firstName: 'Pending',
+      lastName: 'User',
+      password: 'Pending@123456',
+      role: null,
+      isVerified: true,
+      applicationStatus: 'PENDING'
     }
-  });
+  ];
   
-  console.log(`✅ Created admin user: ${adminEmail} / ${adminPassword}`);
-  console.log('⚠️  Please change the admin password after first login!');
+  for (const userData of users) {
+    const hashedPassword = await bcrypt.hash(userData.password, 12);
+    
+    const user = await prisma.user.upsert({
+      where: { email: userData.email },
+      update: {},
+      create: {
+        email: userData.email,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        passwordHash: hashedPassword,
+        isVerified: userData.isVerified,
+        applicationStatus: userData.applicationStatus,
+        roleId: userData.role?.id
+      }
+    });
+    
+    console.log(`✅ Created user: ${userData.email} / ${userData.password} (${userData.role?.name || 'No Role'})`);
+  }
+  
+  console.log('\n📋 Demo Accounts:');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('👑 ADMIN     : admin@nemo-auth.com / Admin@123456');
+  console.log('✏️  EDITOR    : editor@nemo-auth.com / Editor@123456');
+  console.log('📊 MANAGER   : manager@nemo-auth.com / Manager@123456');
+  console.log('👁️  VIEWER    : viewer@nemo-auth.com / Viewer@123456');
+  console.log('⏳ PENDING   : pending@nemo-auth.com / Pending@123456');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 
 main()

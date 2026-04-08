@@ -1,28 +1,40 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { logSecurityEvent } from '@/lib/auth/security';
 
 export async function GET(request, { params }) {
   try {
-    const { token } = params;
+    const { token } = await params;
     
-    const user = await prisma.user.findFirst({
+    console.log('[VERIFY] ========================================');
+    console.log('[VERIFY] Token received:', token);
+    
+    // Force the correct base URL
+    const baseUrl = 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
+    
+    console.log('[VERIFY] Using base URL:', baseUrl);
+    
+    const userWithToken = await prisma.user.findFirst({
       where: {
         verificationToken: token,
         verificationExpiry: { gt: new Date() }
       }
     });
     
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Invalid or expired verification token' },
-        { status: 400 }
-      );
+    console.log('[VERIFY] User found:', userWithToken?.email || 'No user found');
+    
+    if (!userWithToken) {
+      console.log('[VERIFY] No user found, redirecting to error page');
+      return NextResponse.redirect(new URL('/verify/error?reason=invalid_token', baseUrl));
+    }
+    
+    if (userWithToken.isVerified) {
+      console.log('[VERIFY] User already verified');
+      return NextResponse.redirect(new URL('/verify/already-verified', baseUrl));
     }
     
     // Update user as verified
     await prisma.user.update({
-      where: { id: user.id },
+      where: { id: userWithToken.id },
       data: {
         isVerified: true,
         verificationToken: null,
@@ -30,23 +42,19 @@ export async function GET(request, { params }) {
       }
     });
     
-    await logSecurityEvent({
-      userId: user.id,
-      action: 'EMAIL_VERIFIED',
-      details: { email: user.email },
-      success: true,
-      req: request
-    });
+    console.log('[VERIFY] User verified successfully:', userWithToken.email);
     
-    // Redirect to login page with success message
-    return NextResponse.redirect(
-      new URL('/login?verified=true', request.url)
-    );
+    // Redirect to success page (NOT directly to login)
+    const successUrl = new URL('/verify/success', baseUrl);
+    console.log('[VERIFY] Redirecting to success page:', successUrl.toString());
+    
+    return NextResponse.redirect(successUrl);
     
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Verification failed' },
-      { status: 500 }
-    );
+    console.error('[VERIFY] Error:', error);
+    const baseUrl = 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
+    return NextResponse.redirect(new URL('/verify/error?reason=server_error', baseUrl));
   }
 }
+
+export const dynamic = 'force-dynamic';
