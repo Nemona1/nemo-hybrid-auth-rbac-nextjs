@@ -2,18 +2,12 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validatePasswordStrength, logSecurityEvent } from '@/lib/auth/security';
 import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
-import { validateEmailWithZeroBounce } from '@/lib/email/validateEmail';
 import crypto from 'crypto';
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { firstName, lastName, email, password } = body;
-    
-    // Get IP address for better validation
-    const ipAddress = request.headers.get('x-forwarded-for') || 
-                      request.headers.get('x-real-ip') || 
-                      '0.0.0.0';
     
     // Validate input
     if (!firstName || !lastName || !email || !password) {
@@ -44,42 +38,6 @@ export async function POST(request) {
       );
     }
     
-    // Validate email with ZeroBounce (checks if email actually exists)
-    console.log('[Registration] Validating email with ZeroBounce:', email);
-    const validation = await validateEmailWithZeroBounce(email, ipAddress);
-    
-    console.log('[Registration] Validation result:', {
-      valid: validation.valid,
-      shouldBlock: validation.shouldBlock,
-      status: validation.status,
-      message: validation.message
-    });
-    
-    // If email is invalid, block registration
-    if (validation.shouldBlock || !validation.valid) {
-      let errorMessage = validation.message || 'Invalid email address. Please use a valid email address.';
-      
-      // Provide more specific error messages
-      if (validation.status === 'spamtrap') {
-        errorMessage = 'This email appears to be a spam trap. Please use a different email address.';
-      } else if (validation.status === 'abuse') {
-        errorMessage = 'This email has been reported for abuse. Please use a different email address.';
-      } else if (validation.status === 'invalid') {
-        errorMessage = 'This email address does not exist or cannot receive emails. Please check and try again.';
-      }
-      
-      return NextResponse.json(
-        { error: errorMessage },
-        { status: 400 }
-      );
-    }
-    
-    // Optional: Show warning for catch-all domains but allow registration
-    if (validation.status === 'catch-all') {
-      console.log('[Registration] Warning: Catch-all domain detected for:', email);
-      // You can still allow registration but log it
-    }
-    
     // Validate password strength
     const passwordValidation = validatePasswordStrength(password);
     if (!passwordValidation.isValid) {
@@ -91,7 +49,7 @@ export async function POST(request) {
     
     // Generate verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
     
     // Hash password
     const passwordHash = await hashPassword(password);
@@ -133,7 +91,7 @@ export async function POST(request) {
     await logSecurityEvent({
       userId: user.id,
       action: 'USER_REGISTERED',
-      details: { email, validationStatus: validation.status },
+      details: { email },
       success: true,
       req: request
     });

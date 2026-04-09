@@ -2,16 +2,21 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
-import { sendRoleDecisionEmail } from '@/lib/email/sendVerificationEmail';
+import { sendRoleApprovalEmail, sendRoleRejectionEmail } from '@/lib/email/roleDecisionEmail';
+import { createAuditLog } from '@/lib/audit';
 
 export async function GET(request) {
   try {
-    const accessToken = request.cookies.get('accessToken')?.value;
-    if (!accessToken) {
+    let token = request.headers.get('authorization')?.replace('Bearer ', '');
+    if (!token) {
+      token = request.cookies.get('accessToken')?.value;
+    }
+    
+    if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    const { valid, decoded } = await verifyAccessToken(accessToken);
+    const { valid, decoded } = await verifyAccessToken(token);
     if (!valid) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
@@ -67,12 +72,16 @@ export async function PUT(request) {
   try {
     const { userId, roleId, applicationStatus, applicationId, reviewReason } = await request.json();
     
-    const accessToken = request.cookies.get('accessToken')?.value;
-    if (!accessToken) {
+    let token = request.headers.get('authorization')?.replace('Bearer ', '');
+    if (!token) {
+      token = request.cookies.get('accessToken')?.value;
+    }
+    
+    if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    const { valid, decoded } = await verifyAccessToken(accessToken);
+    const { valid, decoded } = await verifyAccessToken(token);
     if (!valid) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
@@ -81,6 +90,13 @@ export async function PUT(request) {
     if (!hasAdminAccess) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    
+    // Get admin user info for email
+    const adminUser = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { firstName: true, lastName: true }
+    });
+    const adminName = `${adminUser?.firstName || 'System'} ${adminUser?.lastName || 'Administrator'}`;
     
     // Update user role
     if (roleId) {
@@ -117,27 +133,68 @@ export async function PUT(request) {
         });
         
         // Send approval email
-        await sendRoleDecisionEmail(
+        await sendRoleApprovalEmail(
           application.user.email,
           application.user.firstName,
           application.requestedRole.name,
-          'APPROVED',
-          reviewReason
+          adminName,
+          new Date()
         );
+        
+        // Create audit log
+        await createAuditLog({
+          userId: decoded.userId,
+          action: 'ROLE_APPLICATION_APPROVED',
+          resourceType: 'role_application',
+          resourceId: applicationId,
+          details: { userId, roleId: application.requestedRoleId, reason: reviewReason },
+          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+          userAgent: request.headers.get('user-agent') || 'unknown'
+        });
+        
       } else if (applicationStatus === 'REJECTED') {
         await prisma.user.update({
           where: { id: userId },
           data: { applicationStatus: 'REJECTED' }
         });
         
+        // Store rejection history (if model exists)
+        try {
+          if (prisma.roleApplicationRejection) {
+            await prisma.roleApplicationRejection.create({
+              data: {
+                roleApplicationId: applicationId,
+                userId: userId,
+                requestedRoleId: application.requestedRoleId,
+                reason: reviewReason || 'No specific reason provided',
+                rejectedBy: decoded.userId
+              }
+            });
+          }
+        } catch (err) {
+          console.log('Rejection model not available, skipping history');
+        }
+        
         // Send rejection email
-        await sendRoleDecisionEmail(
+        await sendRoleRejectionEmail(
           application.user.email,
           application.user.firstName,
           application.requestedRole.name,
-          'REJECTED',
+          adminName,
+          new Date(),
           reviewReason
         );
+        
+        // Create audit log
+        await createAuditLog({
+          userId: decoded.userId,
+          action: 'ROLE_APPLICATION_REJECTED',
+          resourceType: 'role_application',
+          resourceId: applicationId,
+          details: { userId, roleId: application.requestedRoleId, reason: reviewReason },
+          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+          userAgent: request.headers.get('user-agent') || 'unknown'
+        });
       }
     }
     
@@ -146,7 +203,7 @@ export async function PUT(request) {
   } catch (error) {
     console.error('Admin user update error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error: ' + error.message },
       { status: 500 }
     );
   }

@@ -7,26 +7,41 @@ import Sidebar from '@/components/layout/Sidebar';
 import UserTable from '@/components/admin/UserTable';
 import { useAntiTamper } from '@/hooks/useAntiTamper';
 import toast from 'react-hot-toast';
+import { Users, RefreshCw, Search, Filter } from 'lucide-react';
 
 export default function AdminUsersPage() {
   const router = useRouter();
   useAntiTamper();
   const [users, setUsers] = useState([]);
+  const [filteredUsers, setFilteredUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
     fetchUsers();
   }, []);
 
+  useEffect(() => {
+    filterUsers();
+  }, [searchTerm, statusFilter, users]);
+
   const fetchUsers = async () => {
+    setLoading(true);
     try {
-      const res = await fetch('/api/admin/users');
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/admin/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
       if (res.ok) {
         const data = await res.json();
         setUsers(data);
       } else if (res.status === 403) {
         toast.error('Access denied. Admin privileges required.');
         router.push('/dashboard');
+      } else if (res.status === 401) {
+        router.push('/login');
       }
     } catch (error) {
       console.error('Failed to fetch users:', error);
@@ -36,11 +51,35 @@ export default function AdminUsersPage() {
     }
   };
 
+  const filterUsers = () => {
+    let filtered = [...users];
+    
+    // Apply search filter
+    if (searchTerm) {
+      filtered = filtered.filter(user => 
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.lastName.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(user => user.applicationStatus === statusFilter);
+    }
+    
+    setFilteredUsers(filtered);
+  };
+
   const handleRoleUpdate = async (userId, roleId) => {
     try {
+      const token = localStorage.getItem('accessToken');
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ userId, roleId })
       });
       
@@ -48,7 +87,8 @@ export default function AdminUsersPage() {
         toast.success('User role updated successfully');
         fetchUsers();
       } else {
-        toast.error('Failed to update user role');
+        const data = await res.json();
+        toast.error(data.error || 'Failed to update user role');
       }
     } catch (error) {
       toast.error('Network error');
@@ -57,9 +97,13 @@ export default function AdminUsersPage() {
 
   const handleApplicationReview = async (applicationId, userId, status, reason) => {
     try {
+      const token = localStorage.getItem('accessToken');
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           applicationId,
           userId,
@@ -72,7 +116,8 @@ export default function AdminUsersPage() {
         toast.success(`Application ${status.toLowerCase()} successfully`);
         fetchUsers();
       } else {
-        toast.error('Failed to review application');
+        const data = await res.json();
+        toast.error(data.error || 'Failed to review application');
       }
     } catch (error) {
       toast.error('Network error');
@@ -94,12 +139,70 @@ export default function AdminUsersPage() {
         <Sidebar />
         <main className="flex-1 p-8">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground">User Management</h1>
-            <p className="text-muted mt-2">Manage users, roles, and permissions</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-foreground">User Management</h1>
+                <p className="text-muted mt-2">Manage users, roles, and permissions</p>
+              </div>
+              <button
+                onClick={fetchUsers}
+                className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
+          
+          {/* Filters */}
+          <div className="mb-6 flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted" />
+              <input
+                type="text"
+                placeholder="Search users by name or email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input-field pl-10"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted" />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="input-field w-40"
+              >
+                <option value="all">All Status</option>
+                <option value="APPROVED">Approved</option>
+                <option value="PENDING">Pending</option>
+                <option value="REJECTED">Rejected</option>
+              </select>
+            </div>
+          </div>
+          
+          {/* Stats Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-card border border-border rounded-lg p-4">
+              <p className="text-xs text-muted">Total Users</p>
+              <p className="text-2xl font-bold text-foreground">{users.length}</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4">
+              <p className="text-xs text-muted">Approved</p>
+              <p className="text-2xl font-bold text-success">{users.filter(u => u.applicationStatus === 'APPROVED').length}</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4">
+              <p className="text-xs text-muted">Pending</p>
+              <p className="text-2xl font-bold text-warning">{users.filter(u => u.applicationStatus === 'PENDING').length}</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4">
+              <p className="text-xs text-muted">Rejected</p>
+              <p className="text-2xl font-bold text-error">{users.filter(u => u.applicationStatus === 'REJECTED').length}</p>
+            </div>
           </div>
           
           <UserTable
-            users={users}
+            users={filteredUsers}
             onRoleUpdate={handleRoleUpdate}
             onApplicationReview={handleApplicationReview}
           />

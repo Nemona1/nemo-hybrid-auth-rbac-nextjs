@@ -1,19 +1,37 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { createAuditLog } from '@/lib/audit';
+import { sendRoleApplicationSubmittedEmail } from '@/lib/email/roleDecisionEmail';
 
 export async function POST(request) {
   try {
     const { requestedRoleId, justification } = await request.json();
     
-    const accessToken = request.cookies.get('accessToken')?.value;
-    if (!accessToken) {
+    // Validate input
+    if (!requestedRoleId) {
+      return NextResponse.json({ error: 'Role selection is required' }, { status: 400 });
+    }
+    
+    // Get token from Authorization header
+    let token = request.headers.get('authorization')?.replace('Bearer ', '');
+    if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    const { valid, decoded } = await verifyAccessToken(accessToken);
+    const { valid, decoded } = await verifyAccessToken(token);
     if (!valid) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    
+    // Get user details for email
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { email: true, firstName: true }
+    });
+    
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
     // Check if user already has an application
@@ -28,12 +46,21 @@ export async function POST(request) {
       );
     }
     
+    // Get the requested role
+    const requestedRole = await prisma.role.findUnique({
+      where: { id: requestedRoleId }
+    });
+    
+    if (!requestedRole) {
+      return NextResponse.json({ error: 'Invalid role selected' }, { status: 400 });
+    }
+    
     // Create role application
     const application = await prisma.roleApplication.create({
       data: {
         userId: decoded.userId,
         requestedRoleId,
-        justification,
+        justification: justification || '',
         status: 'PENDING'
       },
       include: {
@@ -47,12 +74,35 @@ export async function POST(request) {
       data: { applicationStatus: 'PENDING' }
     });
     
-    return NextResponse.json(application, { status: 201 });
+    // Send confirmation email to user
+    await sendRoleApplicationSubmittedEmail(
+      user.email,
+      user.firstName,
+      requestedRole.name,
+      application.id
+    );
+    
+    // Create audit log
+    await createAuditLog({
+      userId: decoded.userId,
+      action: 'ROLE_APPLICATION_SUBMITTED',
+      resourceType: 'role_application',
+      resourceId: application.id,
+      details: { requestedRoleId, justification, roleName: requestedRole.name },
+      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      userAgent: request.headers.get('user-agent') || 'unknown'
+    });
+    
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Application submitted successfully',
+      data: application 
+    }, { status: 201 });
     
   } catch (error) {
     console.error('Role application error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error. Please try again later.' },
       { status: 500 }
     );
   }
@@ -60,12 +110,12 @@ export async function POST(request) {
 
 export async function GET(request) {
   try {
-    const accessToken = request.cookies.get('accessToken')?.value;
-    if (!accessToken) {
+    let token = request.headers.get('authorization')?.replace('Bearer ', '');
+    if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    const { valid, decoded } = await verifyAccessToken(accessToken);
+    const { valid, decoded } = await verifyAccessToken(token);
     if (!valid) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
@@ -77,7 +127,21 @@ export async function GET(request) {
       }
     });
     
-    return NextResponse.json(application || null);
+    // Get rejection history
+    let rejections = [];
+    try {
+      rejections = await prisma.roleApplicationRejection.findMany({
+        where: { userId: decoded.userId },
+        include: {
+          requestedRole: true
+        },
+        orderBy: { rejectedAt: 'desc' }
+      });
+    } catch (err) {
+      console.log('Rejection history not available');
+    }
+    
+    return NextResponse.json({ application, rejections });
     
   } catch (error) {
     console.error('Fetch application error:', error);

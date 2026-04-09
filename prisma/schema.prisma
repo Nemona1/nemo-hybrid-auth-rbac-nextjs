@@ -46,6 +46,8 @@ model User {
   
   // Audit Logs
   auditLogs         AuditLog[]
+
+   roleApplicationRejections RoleApplicationRejection[]
   
   // Timestamps
   createdAt         DateTime  @default(now())
@@ -64,6 +66,7 @@ model Role {
   users       User[]
   permissions RolePermission[]
   roleApplications RoleApplication[]
+    roleApplicationRejections RoleApplicationRejection[]
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -130,9 +133,29 @@ model RoleApplication {
   reviewedBy  String?
   reviewedAt  DateTime?
   reviewedReason String?
+   rejections RoleApplicationRejection[]
   createdAt   DateTime         @default(now())
   
   @@map("role_applications")
+}
+
+// Role Application Rejection History - Add this at the end of your schema
+model RoleApplicationRejection {
+  id                String   @id @default(cuid())
+  roleApplicationId String
+  roleApplication   RoleApplication @relation(fields: [roleApplicationId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedRoleId   String
+  requestedRole     Role     @relation(fields: [requestedRoleId], references: [id])
+  reason            String
+  rejectedBy        String
+  rejectedAt        DateTime @default(now())
+  
+  @@index([userId])
+  @@index([roleApplicationId])
+  @@index([requestedRoleId])
+  @@map("role_application_rejections")
 }
 
 // Security Logs for Audit Trail
