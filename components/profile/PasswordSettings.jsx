@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Key, Mail, RefreshCw, Eye, EyeOff, Lock, AlertCircle, Timer } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function SecuritySettings({ user }) {
+export default function PasswordSettings({ user }) {
   const [step, setStep] = useState('request'); // 'request', 'verify', 'change'
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
@@ -104,7 +104,6 @@ export default function SecuritySettings({ user }) {
     setVerifyingOtp(true);
     
     try {
-      // Just verify OTP first, don't change password yet
       const token = localStorage.getItem('accessToken');
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',

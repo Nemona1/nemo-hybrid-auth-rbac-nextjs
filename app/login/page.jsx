@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { Mail, Lock, LogIn, Eye, EyeOff, Users, UserCog, FileText, Eye as EyeIcon, Clock, AlertCircle, Timer } from 'lucide-react';
+import { Mail, Lock, LogIn, Eye, EyeOff, Users, UserCog, FileText, Eye as EyeIcon, Clock, AlertCircle, Timer, Shield } from 'lucide-react';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 
 const DEMO_ACCOUNTS = [
@@ -16,6 +16,7 @@ const DEMO_ACCOUNTS = [
 ];
 
 export default function LoginPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,7 +101,7 @@ export default function LoginPage() {
       window.history.replaceState({}, '', url);
     }
     
-    // Handle email verification required after email change (FIXED: use toast instead of toast.info)
+    // Handle email verification required after email change
     const emailVerificationRequired = searchParams.get('email_verification_required');
     if (emailVerificationRequired === 'true') {
       toast('📧 Please verify your new email address before logging in. Check your inbox for the verification link.', {
@@ -132,6 +133,20 @@ export default function LoginPage() {
       });
 
       const data = await res.json();
+
+      // Handle 2FA required response
+      if (data.requiresTwoFactor) {
+        // FIXED: Use toast instead of toast.info
+        toast(data.message || 'Verification code sent to your email', {
+          duration: 5000,
+          position: 'top-center',
+          icon: '🔐'
+        });
+        // Store temp session info and redirect to 2FA verification page
+        sessionStorage.setItem('temp2faEmail', formData.email);
+        router.push('/verify-2fa');
+        return;
+      }
 
       if (res.ok && data.accessToken) {
         localStorage.setItem('accessToken', data.accessToken);
@@ -178,6 +193,7 @@ export default function LoginPage() {
         setLoading(false);
       }
     } catch (error) {
+      console.error('Login error:', error);
       toast.error('Network error. Please try again.');
       setLoading(false);
     }
@@ -254,6 +270,16 @@ export default function LoginPage() {
             </div>
           </div>
         )}
+        
+        {/* 2FA Info Banner */}
+        <div className="mb-6 bg-primary/5 border border-primary/20 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            <p className="text-xs text-muted">
+              🔐 This account has Two-Factor Authentication enabled. You'll receive a verification code after entering your password.
+            </p>
+          </div>
+        </div>
         
         {/* Demo Accounts Section */}
         <div className="mb-8">

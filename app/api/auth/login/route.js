@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { verifyPassword, handleFailedLogin, resetFailedAttempts, logSecurityEvent } from '@/lib/auth/security';
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt';
 import { createAuditLog } from '@/lib/audit';
+import { generateOtp, storeOtp, generateDeviceFingerprint } from '@/lib/auth/2fa';
+import { send2faOtpEmail } from '@/lib/email/send2faOtp';
 
 export async function POST(request) {
   try {
@@ -75,6 +77,86 @@ export async function POST(request) {
     // Reset failed attempts
     await resetFailedAttempts(email);
     
+    // ============================================================
+    // TWO-FACTOR AUTHENTICATION CHECK
+    // ============================================================
+    
+    if (user.twoFactorEnabled) {
+      console.log('[LOGIN] 2FA enabled for user:', email);
+      
+      // Generate OTP
+      const otp = generateOtp();
+      storeOtp(user.id, otp);
+      
+      // Send OTP email
+      const emailSent = await send2faOtpEmail(user.email, otp, user.firstName);
+      
+      if (!emailSent) {
+        return NextResponse.json(
+          { error: 'Failed to send verification code. Please try again.' },
+          { status: 500 }
+        );
+      }
+      
+      // Check if device is trusted
+      let isTrustedDevice = false;
+      const deviceId = generateDeviceFingerprint(userAgent, ipAddress);
+      
+      const trustedDevice = await prisma.trustedDevice.findFirst({
+        where: {
+          userId: user.id,
+          deviceId,
+          expiresAt: { gt: new Date() }
+        }
+      });
+      
+      if (trustedDevice) {
+        isTrustedDevice = true;
+        await prisma.trustedDevice.update({
+          where: { id: trustedDevice.id },
+          data: { lastUsedAt: new Date() }
+        });
+      }
+      
+      // Create temporary session for 2FA
+      const tempSession = Buffer.from(JSON.stringify({
+        userId: user.id,
+        expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes
+      })).toString('base64');
+      
+      const isProduction = process.env.NODE_ENV === 'production';
+      
+      const twoFactorResponse = NextResponse.json({
+        requiresTwoFactor: true,
+        message: 'Two-factor authentication required. A verification code has been sent to your email.',
+        isTrustedDevice
+      });
+      
+      twoFactorResponse.cookies.set('temp2faSession', tempSession, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 10 * 60
+      });
+      
+      await createAuditLog({
+        userId: user.id,
+        action: '2FA_CODE_SENT',
+        resourceType: 'user',
+        resourceId: user.id,
+        details: { email: user.email },
+        ipAddress,
+        userAgent
+      });
+      
+      return twoFactorResponse;
+    }
+    
+    // ============================================================
+    // NORMAL LOGIN (NO 2FA)
+    // ============================================================
+    
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
@@ -121,7 +203,8 @@ export async function POST(request) {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        applicationStatus: user.applicationStatus
+        applicationStatus: user.applicationStatus,
+        twoFactorEnabled: user.twoFactorEnabled
       }
     });
     

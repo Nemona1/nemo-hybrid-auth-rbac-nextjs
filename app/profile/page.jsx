@@ -4,12 +4,20 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/layout/Navbar';
 import Sidebar from '@/components/layout/Sidebar';
-import ProfileInfo from '@/components/profile/ProfileInfo';
-import SecuritySettings from '@/components/profile/SecuritySettings';
-import ActiveSessions from '@/components/profile/ActiveSessions';
 import { useSidebar } from '@/context/SidebarContext';
 import { useAntiTamper } from '@/hooks/useAntiTamper';
-import { User, Shield, Smartphone } from 'lucide-react';
+import { 
+  User, 
+  Shield, 
+  Key, 
+  Smartphone,
+  Lock,
+  Fingerprint
+} from 'lucide-react';
+import ProfileInfo from '@/components/profile/ProfileInfo';
+import PasswordSettings from '@/components/profile/PasswordSettings';
+import TwoFactorAuth from '@/components/profile/TwoFactorAuth';
+import ActiveSessions from '@/components/profile/ActiveSessions';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -33,6 +41,10 @@ export default function ProfilePage() {
       
       if (res.ok) {
         const data = await res.json();
+        console.log('[Profile] User data fetched:', { 
+          email: data.email, 
+          twoFactorEnabled: data.twoFactorEnabled 
+        });
         setUser(data);
       } else if (res.status === 401) {
         router.push('/login');
@@ -45,6 +57,7 @@ export default function ProfilePage() {
   };
 
   const handleUserUpdate = () => {
+    console.log('[Profile] Refreshing user data after update');
     fetchUserData();
   };
 
@@ -57,9 +70,10 @@ export default function ProfilePage() {
   }
 
   const tabs = [
-    { id: 'profile', label: 'Profile Information', icon: User },
-    { id: 'security', label: 'Security', icon: Shield },
-    { id: 'sessions', label: 'Active Sessions', icon: Smartphone },
+    { id: 'profile', label: 'Profile Information', icon: User, description: 'Manage your personal information' },
+    { id: 'password', label: 'Password', icon: Lock, description: 'Change your password' },
+    { id: 'two-factor', label: 'Two-Factor Authentication', icon: Fingerprint, description: 'Add an extra layer of security' },
+    { id: 'sessions', label: 'Active Sessions', icon: Smartphone, description: 'Manage your active devices' },
   ];
 
   return (
@@ -88,7 +102,7 @@ export default function ProfilePage() {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`
-                      flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-all
+                      flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg transition-all
                       ${isActive 
                         ? 'text-primary border-b-2 border-primary bg-primary/5' 
                         : 'text-muted hover:text-foreground hover:bg-muted/5'
@@ -96,7 +110,7 @@ export default function ProfilePage() {
                     `}
                   >
                     <Icon className="h-4 w-4" />
-                    {tab.label}
+                    <span className="hidden sm:inline">{tab.label}</span>
                   </button>
                 );
               })}
@@ -108,8 +122,12 @@ export default function ProfilePage() {
             <ProfileInfo user={user} onUpdate={handleUserUpdate} loading={loading} />
           )}
           
-          {activeTab === 'security' && (
-            <SecuritySettings user={user} />
+          {activeTab === 'password' && (
+            <PasswordSettings user={user} />
+          )}
+          
+          {activeTab === 'two-factor' && (
+            <TwoFactorAuth user={user} onUpdate={handleUserUpdate} />
           )}
           
           {activeTab === 'sessions' && (

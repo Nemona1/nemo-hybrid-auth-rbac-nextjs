@@ -29,6 +29,18 @@ model User {
   passwordChangeOtpAttempts  Int     @default(0)
   passwordChangeOtpLockout   DateTime?
 
+  // 2FA Fields
+  twoFactorEnabled       Boolean   @default(false)
+  twoFactorSecret        String?   // Encrypted secret for TOTP (future Google Authenticator)
+  twoFactorBackupCodes   String?   // JSON array of hashed backup codes
+
+   twoFactorOtp         String?
+  twoFactorOtpExpiry   DateTime?
+  twoFactorOtpAttempts Int       @default(0)
+  
+  // Trusted Devices
+  trustedDevices         TrustedDevice[]
+
   passwordResetToken  String?   @unique
   passwordResetExpiry DateTime?
   
@@ -206,6 +218,24 @@ model AuditLog {
   @@index([userId, timestamp])
   @@index([action, timestamp])
   @@map("audit_logs")
+}
+
+model TrustedDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId    String   // Unique device fingerprint
+  deviceName  String   // User-provided name or auto-generated
+  deviceType  String   // 'browser', 'mobile', 'desktop'
+  ipAddress   String?
+  userAgent   String?
+  lastUsedAt  DateTime @default(now())
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  
+  @@unique([userId, deviceId])
+  @@index([userId, expiresAt])
+  @@map("trusted_devices")
 }
 
 // Session Tracking (for inactivity enforcement)

@@ -34,13 +34,16 @@ export async function GET(request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
+    // Return all user data including twoFactorEnabled
     return NextResponse.json({
       id: user.id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
-      applicationStatus: user.applicationStatus
+      applicationStatus: user.applicationStatus,
+      twoFactorEnabled: user.twoFactorEnabled,  // ← ADD THIS LINE
+      isVerified: user.isVerified               // ← Also add this for completeness
     });
     
   } catch (error) {
