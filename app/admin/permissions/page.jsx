@@ -6,11 +6,13 @@ import Navbar from '@/components/layout/Navbar';
 import Sidebar from '@/components/layout/Sidebar';
 import PermissionToggler from '@/components/admin/PermissionToggler';
 import { useAntiTamper } from '@/hooks/useAntiTamper';
+import { useSidebar } from '@/context/SidebarContext';
 import toast from 'react-hot-toast';
 import { Key, RefreshCw, Search } from 'lucide-react';
 
 export default function AdminPermissionsPage() {
   const router = useRouter();
+  const { collapsed } = useSidebar();
   useAntiTamper();
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
@@ -90,14 +92,6 @@ export default function AdminPermissionsPage() {
       if (res.ok) {
         toast.success(data.message || `Permission ${isGranted ? 'granted' : 'revoked'} successfully`);
         fetchUsersAndPermissions();
-        // Keep selected user selected
-        const updatedUser = await fetch(`/api/admin/users/${userId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (updatedUser.ok) {
-          const userData = await updatedUser.json();
-          setSelectedUser(userData);
-        }
       } else {
         toast.error(data.error || 'Failed to update permission');
       }
@@ -119,7 +113,8 @@ export default function AdminPermissionsPage() {
       <Navbar />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-8">
+        {/* Main content with dynamic margin based on sidebar state */}
+        <main className={`flex-1 p-8 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-64'}`}>
           <div className="mb-8">
             <div className="flex items-center justify-between">
               <div>

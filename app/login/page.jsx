@@ -1,23 +1,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation'; // Add this import
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { Mail, Lock, LogIn, Eye, EyeOff, Users, UserCog, FileText, Eye as EyeIcon, Clock, AlertCircle, Timer } from 'lucide-react';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 
 const DEMO_ACCOUNTS = [
-  { role: 'Admin', email: 'admin@nemo-auth.com', password: 'Admin@123456', icon: UserCog, color: 'bg-purple-600' },
+  { role: 'Admin', email: 'nimonahirko@gmail.com', password: 'Nimo@9137l', icon: UserCog, color: 'bg-purple-600' },
   { role: 'Editor', email: 'editor@nemo-auth.com', password: 'Editor@123456', icon: FileText, color: 'bg-blue-600' },
   { role: 'Manager', email: 'manager@nemo-auth.com', password: 'Manager@123456', icon: Users, color: 'bg-green-600' },
   { role: 'Viewer', email: 'viewer@nemo-auth.com', password: 'Viewer@123456', icon: EyeIcon, color: 'bg-gray-600' },
   { role: 'Pending', email: 'nimona2024hirko@gmail.com', password: 'Nimo@1234', icon: Clock, color: 'bg-yellow-600' },
-
 ];
 
 export default function LoginPage() {
-  const searchParams = useSearchParams(); // Add this line
+  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [lockoutInfo, setLockoutInfo] = useState({
@@ -50,12 +49,15 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, [lockoutInfo.isLocked, lockoutInfo.remainingSeconds]);
 
-  // Handle verification success message from URL params
+  // Handle URL parameters (verification success, errors, session expired)
   useEffect(() => {
     const verified = searchParams.get('verified');
     if (verified === 'true') {
-      toast.success('Email verified successfully! You can now log in.');
-      // Remove the query parameter from URL without refreshing
+      toast.success('Email verified successfully! You can now log in.', {
+        duration: 5000,
+        position: 'top-center',
+        icon: '✅'
+      });
       const url = new URL(window.location.href);
       url.searchParams.delete('verified');
       window.history.replaceState({}, '', url);
@@ -63,9 +65,50 @@ export default function LoginPage() {
     
     const error = searchParams.get('error');
     if (error === 'invalid_verification_token') {
-      toast.error('Invalid verification link. Please register again.');
+      toast.error('Invalid verification link. Please register again.', {
+        duration: 5000,
+        position: 'top-center'
+      });
       const url = new URL(window.location.href);
       url.searchParams.delete('error');
+      window.history.replaceState({}, '', url);
+    }
+    
+    // Handle session expired due to inactivity
+    const expired = searchParams.get('expired');
+    if (expired === 'true') {
+      toast.error('Your session expired due to inactivity. Please login again.', {
+        duration: 6000,
+        position: 'top-center',
+        icon: '⏰'
+      });
+      const url = new URL(window.location.href);
+      url.searchParams.delete('expired');
+      window.history.replaceState({}, '', url);
+    }
+    
+    // Handle account locked
+    const locked = searchParams.get('locked');
+    if (locked === 'true') {
+      toast.error('Your account has been temporarily locked due to multiple failed attempts. Please try again later.', {
+        duration: 6000,
+        position: 'top-center',
+        icon: '🔒'
+      });
+      const url = new URL(window.location.href);
+      url.searchParams.delete('locked');
+      window.history.replaceState({}, '', url);
+    }
+    
+    // Handle email verification required after email change (FIXED: use toast instead of toast.info)
+    const emailVerificationRequired = searchParams.get('email_verification_required');
+    if (emailVerificationRequired === 'true') {
+      toast('📧 Please verify your new email address before logging in. Check your inbox for the verification link.', {
+        duration: 8000,
+        position: 'top-center'
+      });
+      const url = new URL(window.location.href);
+      url.searchParams.delete('email_verification_required');
       window.history.replaceState({}, '', url);
     }
   }, [searchParams]);
@@ -94,7 +137,11 @@ export default function LoginPage() {
         localStorage.setItem('accessToken', data.accessToken);
         localStorage.setItem('refreshToken', data.refreshToken);
         
-        toast.success('Login successful! Redirecting...');
+        toast.success('Login successful! Redirecting...', {
+          duration: 2000,
+          position: 'top-center',
+          icon: '🎉'
+        });
         window.location.href = data.redirectUrl || '/dashboard';
       } else {
         if (data.locked) {
@@ -111,6 +158,20 @@ export default function LoginPage() {
             remainingAttempts: data.remainingAttempts
           });
           toast.error(data.error);
+          if (data.remainingAttempts === 1) {
+            toast.warning('Warning: Last attempt before account lockout!', {
+              duration: 4000,
+              position: 'top-center',
+              icon: '⚠️'
+            });
+          }
+        } else if (data.error === 'Please verify your email before logging in') {
+          toast.error(data.error, {
+            duration: 5000,
+            position: 'top-center',
+            icon: '📧'
+          });
+          setLoading(false);
         } else {
           toast.error(data.error || 'Login failed');
         }
@@ -137,7 +198,11 @@ export default function LoginPage() {
 
   const fillDemoAccount = (email, password) => {
     setFormData({ email, password });
-    toast.success(`Demo account loaded: ${email.split('@')[0]}`);
+    toast.success(`Demo account loaded: ${email.split('@')[0]}`, {
+      duration: 2000,
+      position: 'top-center',
+      icon: '🚀'
+    });
   };
 
   return (
@@ -180,10 +245,10 @@ export default function LoginPage() {
               <AlertCircle className="h-6 w-6 text-warning" />
               <div className="flex-1">
                 <p className="text-sm text-warning">
-                  <span className="font-bold text-lg">{lockoutInfo.remainingAttempts}</span> attempts remaining
+                  <span className="font-bold text-lg">{lockoutInfo.remainingAttempts}</span> attempt{lockoutInfo.remainingAttempts !== 1 ? 's' : ''} remaining
                 </p>
                 <p className="text-xs text-warning/80 mt-1">
-                  3 failed attempts = 30-second lockout
+                  ⚠️ 3 failed attempts = 30-second account lockout
                 </p>
               </div>
             </div>
@@ -270,26 +335,31 @@ export default function LoginPage() {
             {loading ? (
               <div className="spinner"></div>
             ) : lockoutInfo.isLocked ? (
-              <>Wait {lockoutInfo.remainingSeconds}s</>
+              <>
+                <Timer className="h-5 w-5" />
+                Wait {lockoutInfo.remainingSeconds}s
+              </>
             ) : (
-              <>Sign In</>
+              <>
+                <LogIn className="h-5 w-5" />
+                Sign In
+              </>
             )}
           </button>
-          <div className="text-right">
+          
+          <div className="flex justify-between items-center">
+            <Link href="/register" className="text-sm text-primary hover:text-primary-hover">
+              Create account
+            </Link>
             <Link href="/forgot-password" className="text-sm text-primary hover:text-primary-hover">
               Forgot Password?
-            </Link>
-          </div>
-          
-          <div className="text-center">
-            <Link href="/register" className="text-primary hover:text-primary-hover text-sm">
-              Create an account
             </Link>
           </div>
         </form>
         
         <div className="mt-6 text-center">
           <p className="text-xs text-muted">🔒 Enterprise-grade security | 3 failed attempts = 30s lockout</p>
+          <p className="text-xs text-muted mt-1">⏰ Session expires after 1 minute of inactivity</p>
         </div>
       </div>
     </div>

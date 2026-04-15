@@ -2,8 +2,10 @@
 
 import { Card } from '@/components/ui/Card';
 import { FileText, Edit, CheckCircle, Clock, PlusCircle, FolderOpen } from 'lucide-react';
+import { useInactivityTimer } from '@/hooks/useInactivityTimer';
 
 export default function EditorDashboard() {
+    useInactivityTimer(1); // 1 minute timeout for inactivity
   const stats = {
     totalContent: 156,
     publishedContent: 89,

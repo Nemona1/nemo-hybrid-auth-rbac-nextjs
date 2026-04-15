@@ -6,26 +6,35 @@ import { createAuditLog } from '@/lib/audit';
 
 export async function GET(request) {
   try {
+    console.log('[ROLES API] ========== START ==========');
+    
     // Get token from Authorization header or cookie
     let token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (!token) {
       token = request.cookies.get('accessToken')?.value;
     }
     
+    console.log('[ROLES API] Token exists:', !!token);
+    
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
     const { valid, decoded } = await verifyAccessToken(token);
+    console.log('[ROLES API] Token valid:', valid);
+    
     if (!valid) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
     const hasAccess = await hasPermission(decoded.userId, 'roles:read');
+    console.log('[ROLES API] Has access:', hasAccess);
+    
     if (!hasAccess) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
     }
     
+    // Fetch roles
     const roles = await prisma.role.findMany({
       include: {
         permissions: {
@@ -40,16 +49,25 @@ export async function GET(request) {
       orderBy: { createdAt: 'asc' }
     });
     
+    console.log('[ROLES API] Found roles:', roles.length);
+    
+    // Fetch permissions - FIXED orderBy syntax
     const permissions = await prisma.permission.findMany({
-      orderBy: { category: 'asc', name: 'asc' }
+      orderBy: [
+        { category: 'asc' },
+        { name: 'asc' }
+      ]
     });
+    
+    console.log('[ROLES API] Found permissions:', permissions.length);
+    console.log('[ROLES API] ========== END ==========');
     
     return NextResponse.json({ roles, permissions });
     
   } catch (error) {
     console.error('[ROLES API] Fetch error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error: ' + error.message },
       { status: 500 }
     );
   }
@@ -132,7 +150,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('[ROLES API] Create error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error: ' + error.message },
       { status: 500 }
     );
   }
@@ -219,7 +237,7 @@ export async function PUT(request) {
   } catch (error) {
     console.error('[ROLES API] Update error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error: ' + error.message },
       { status: 500 }
     );
   }
@@ -302,7 +320,7 @@ export async function DELETE(request) {
   } catch (error) {
     console.error('[ROLES API] Delete error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error: ' + error.message },
       { status: 500 }
     );
   }

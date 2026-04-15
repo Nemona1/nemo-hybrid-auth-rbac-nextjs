@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Users, Shield, Key, Activity, TrendingUp, Server, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useInactivityTimer } from '@/hooks/useInactivityTimer';
 
 export default function AdminDashboard() {
+   useInactivityTimer(1); // 1 minute timeout for inactivity
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalRoles: 0,

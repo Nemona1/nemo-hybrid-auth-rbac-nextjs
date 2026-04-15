@@ -6,11 +6,13 @@ import Navbar from '@/components/layout/Navbar';
 import Sidebar from '@/components/layout/Sidebar';
 import UserTable from '@/components/admin/UserTable';
 import { useAntiTamper } from '@/hooks/useAntiTamper';
+import { useSidebar } from '@/context/SidebarContext';
 import toast from 'react-hot-toast';
 import { Users, RefreshCw, Search, Filter } from 'lucide-react';
 
 export default function AdminUsersPage() {
   const router = useRouter();
+  const { collapsed } = useSidebar();
   useAntiTamper();
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
@@ -137,7 +139,8 @@ export default function AdminUsersPage() {
       <Navbar />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-8">
+        {/* Main content with dynamic margin based on sidebar state */}
+        <main className={`flex-1 p-8 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-64'}`}>
           <div className="mb-8">
             <div className="flex items-center justify-between">
               <div>

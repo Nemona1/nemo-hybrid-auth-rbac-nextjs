@@ -6,11 +6,13 @@ import Navbar from '@/components/layout/Navbar';
 import Sidebar from '@/components/layout/Sidebar';
 import RoleManager from '@/components/admin/RoleManager';
 import { useAntiTamper } from '@/hooks/useAntiTamper';
+import { useSidebar } from '@/context/SidebarContext';
 import toast from 'react-hot-toast';
 import { Shield, RefreshCw } from 'lucide-react';
 
 export default function AdminRolesPage() {
   const router = useRouter();
+  const { collapsed } = useSidebar();
   useAntiTamper();
   const [roles, setRoles] = useState([]);
   const [permissions, setPermissions] = useState([]);
@@ -24,22 +26,32 @@ export default function AdminRolesPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem('accessToken');
+      console.log('[AdminRoles] Fetching roles with token:', !!token);
+      
       const res = await fetch('/api/admin/roles', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
+      console.log('[AdminRoles] Response status:', res.status);
+      
       if (res.ok) {
         const data = await res.json();
-        setRoles(data.roles);
-        setPermissions(data.permissions);
+        console.log('[AdminRoles] Received roles:', data.roles?.length || 0);
+        console.log('[AdminRoles] Received permissions:', data.permissions?.length || 0);
+        setRoles(data.roles || []);
+        setPermissions(data.permissions || []);
       } else if (res.status === 403) {
         toast.error('Access denied. Admin privileges required.');
         router.push('/dashboard');
       } else if (res.status === 401) {
         router.push('/login');
+      } else {
+        const errorData = await res.json();
+        console.error('[AdminRoles] Error response:', errorData);
+        toast.error(errorData.error || 'Failed to load roles');
       }
     } catch (error) {
-      console.error('Failed to fetch roles:', error);
+      console.error('[AdminRoles] Failed to fetch roles:', error);
       toast.error('Failed to load roles');
     } finally {
       setLoading(false);
@@ -132,7 +144,8 @@ export default function AdminRolesPage() {
       <Navbar />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-8">
+        {/* Main content with dynamic margin based on sidebar state */}
+        <main className={`flex-1 p-8 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-64'}`}>
           <div className="mb-8">
             <div className="flex items-center justify-between">
               <div>
@@ -168,13 +181,21 @@ export default function AdminRolesPage() {
             </div>
           </div>
           
-          <RoleManager
-            roles={roles}
-            permissions={permissions}
-            onCreateRole={handleCreateRole}
-            onUpdateRole={handleUpdateRole}
-            onDeleteRole={handleDeleteRole}
-          />
+          {roles.length === 0 ? (
+            <div className="text-center py-12 bg-card rounded-lg border border-border">
+              <Shield className="h-12 w-12 text-muted mx-auto mb-4" />
+              <p className="text-muted">No roles found</p>
+              <p className="text-sm text-muted/70 mt-1">Click "Create New Role" to add your first role</p>
+            </div>
+          ) : (
+            <RoleManager
+              roles={roles}
+              permissions={permissions}
+              onCreateRole={handleCreateRole}
+              onUpdateRole={handleUpdateRole}
+              onDeleteRole={handleDeleteRole}
+            />
+          )}
         </main>
       </div>
     </div>

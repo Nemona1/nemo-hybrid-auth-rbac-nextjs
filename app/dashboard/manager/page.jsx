@@ -2,8 +2,9 @@
 
 import { Card } from '@/components/ui/Card';
 import { Users, CheckSquare, Clock, TrendingUp, UserCheck, FileText } from 'lucide-react';
-
+import { useInactivityTimer } from '@/hooks/useInactivityTimer';
 export default function ManagerDashboard() {
+    useInactivityTimer(1); // 1 minute timeout for inactivity
   const stats = {
     teamMembers: 8,
     pendingApprovals: 5,

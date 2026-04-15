@@ -1,6 +1,7 @@
 import { Inter } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './providers';
+import { SidebarProvider } from '@/context/SidebarContext';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -15,32 +16,34 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider>
-          {children}
-          <Toaster 
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: 'var(--card)',
-                color: 'var(--foreground)',
-                border: '1px solid var(--border)',
-              },
-              success: {
-                duration: 3000,
-                iconTheme: {
-                  primary: 'var(--success)',
-                  secondary: 'var(--background)',
-                },
-              },
-              error: {
+          <SidebarProvider>
+            {children}
+            <Toaster 
+              position="top-right"
+              toastOptions={{
                 duration: 4000,
-                iconTheme: {
-                  primary: 'var(--error)',
-                  secondary: 'var(--background)',
+                style: {
+                  background: 'var(--card)',
+                  color: 'var(--foreground)',
+                  border: '1px solid var(--border)',
                 },
-              },
-            }}
-          />
+                success: {
+                  duration: 3000,
+                  iconTheme: {
+                    primary: 'var(--success)',
+                    secondary: 'var(--background)',
+                  },
+                },
+                error: {
+                  duration: 4000,
+                  iconTheme: {
+                    primary: 'var(--error)',
+                    secondary: 'var(--background)',
+                  },
+                },
+              }}
+            />
+          </SidebarProvider>
         </ThemeProvider>
       </body>
     </html>
