@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 
 export async function GET(request) {
   try {
@@ -76,6 +77,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const { name, description, permissionIds } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!name || !name.trim()) {
       return NextResponse.json(
@@ -130,6 +133,16 @@ export async function POST(request) {
       }
     });
     
+    // Log security event for role creation
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ROLE_CREATED,
+      ipAddress,
+      userAgent,
+      details: { roleName: name, description, permissionCount: permissionIds?.length || 0 },
+      success: true
+    });
+    
     // Create audit log
     await createAuditLog({
       userId: decoded.userId,
@@ -137,8 +150,8 @@ export async function POST(request) {
       resourceType: 'role',
       resourceId: role.id,
       details: { name, description, permissionIds },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({
@@ -159,6 +172,8 @@ export async function POST(request) {
 export async function PUT(request) {
   try {
     const { id, name, description, permissionIds } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!id) {
       return NextResponse.json(
@@ -217,6 +232,16 @@ export async function PUT(request) {
       }
     });
     
+    // Log security event for role update
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ROLE_UPDATED,
+      ipAddress,
+      userAgent,
+      details: { roleId: id, roleName: name, permissionCount: permissionIds?.length || 0 },
+      success: true
+    });
+    
     // Create audit log
     await createAuditLog({
       userId: decoded.userId,
@@ -224,8 +249,8 @@ export async function PUT(request) {
       resourceType: 'role',
       resourceId: role.id,
       details: { name, description, permissionIds },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({
@@ -247,6 +272,8 @@ export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!id) {
       return NextResponse.json(
@@ -301,6 +328,16 @@ export async function DELETE(request) {
     
     await prisma.role.delete({ where: { id } });
     
+    // Log security event for role deletion
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ROLE_DELETED,
+      ipAddress,
+      userAgent,
+      details: { roleId: id, roleName: role.name, hadUsers: userCount > 0 },
+      success: true
+    });
+    
     // Create audit log
     await createAuditLog({
       userId: decoded.userId,
@@ -308,8 +345,8 @@ export async function DELETE(request) {
       resourceType: 'role',
       resourceId: id,
       details: { roleName: role.name },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({

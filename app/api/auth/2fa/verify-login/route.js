@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyStoredOtp, verifyBackupCode, generateDeviceFingerprint, getDeviceType, getDeviceName } from '@/lib/auth/2fa';
-import { createAuditLog } from '@/lib/audit';
+import { createAuditLog, AuditActions } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt';
 
 export async function POST(request) {
@@ -51,6 +52,9 @@ export async function POST(request) {
     
     console.log('[2FA Verify] User found:', user.email);
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     let isValid = false;
     let verificationMethod = '';
     
@@ -64,6 +68,16 @@ export async function POST(request) {
         isValid = true;
         verificationMethod = 'OTP';
       } else {
+        // Log security event for failed OTP verification during login
+        await logSecurityEvent({
+          userId: user.id,
+          action: SecurityActions.TWO_FACTOR_VERIFICATION_FAILED,
+          ipAddress,
+          userAgent,
+          details: { reason: verification.error, method: 'OTP', loginAttempt: true },
+          success: false
+        });
+        
         return NextResponse.json({ error: verification.error }, { status: 401 });
       }
     }
@@ -77,6 +91,16 @@ export async function POST(request) {
         isValid = true;
         verificationMethod = 'BACKUP_CODE';
         
+        // Log security event for backup code usage
+        await logSecurityEvent({
+          userId: user.id,
+          action: SecurityActions.TWO_FACTOR_BACKUP_CODE_USED,
+          ipAddress,
+          userAgent,
+          details: { backupCodeUsed: true },
+          success: true
+        });
+        
         // Remove used backup code
         const remainingCodes = storedCodes.filter(c => c.code !== matchedCode);
         await prisma.user.update({
@@ -89,21 +113,40 @@ export async function POST(request) {
     if (!isValid) {
       await createAuditLog({
         userId: user.id,
-        action: '2FA_VERIFICATION_FAILED',
+        action: AuditActions['2FA_VERIFICATION_FAILED'],
         resourceType: 'user',
         resourceId: user.id,
         details: { method: otp ? 'OTP' : 'BACKUP_CODE' },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        ipAddress,
+        userAgent
       });
       
       return NextResponse.json({ error: 'Invalid verification code' }, { status: 401 });
     }
     
+    // Log security event for successful 2FA verification
+    await logSecurityEvent({
+      userId: user.id,
+      action: SecurityActions.TWO_FACTOR_VERIFICATION_SUCCESS,
+      ipAddress,
+      userAgent,
+      details: { method: verificationMethod, rememberDevice },
+      success: true
+    });
+    
+    // Create audit log for successful verification
+    await createAuditLog({
+      userId: user.id,
+      action: AuditActions['2FA_VERIFICATION_SUCCESS'],
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { method: verificationMethod, rememberDevice },
+      ipAddress,
+      userAgent
+    });
+    
     // Handle trusted device
     if (rememberDevice) {
-      const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
-      const userAgent = request.headers.get('user-agent') || 'unknown';
       const deviceId = generateDeviceFingerprint(userAgent, ipAddress);
       const deviceType = getDeviceType(userAgent);
       const deviceName = getDeviceName(userAgent);
@@ -191,16 +234,6 @@ export async function POST(request) {
     
     // Clear the temporary 2FA session cookie
     response.cookies.delete('temp2faSession');
-    
-    await createAuditLog({
-      userId: user.id,
-      action: '2FA_VERIFICATION_SUCCESS',
-      resourceType: 'user',
-      resourceId: user.id,
-      details: { method: verificationMethod, rememberDevice },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
-    });
     
     console.log('[2FA Verify] Verification successful, sending response');
     

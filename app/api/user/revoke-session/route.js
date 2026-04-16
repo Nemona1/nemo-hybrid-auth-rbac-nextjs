@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function POST(request) {
   try {
     const { sessionToken } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!sessionToken) {
       return NextResponse.json({ error: 'Session token required' }, { status: 400 });
@@ -46,7 +50,35 @@ export async function POST(request) {
       where: { sessionToken }
     });
     
-    // Log the action
+    // Log security event for session revocation
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.SESSION_REVOKED,
+      ipAddress,
+      userAgent,
+      details: { 
+        sessionToken, 
+        deviceInfo: session.userAgent,
+        wasCurrentSession: isCurrentSession
+      },
+      success: true
+    });
+    
+    // Create audit log
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.SESSION_REVOKED,
+      resourceType: 'session',
+      resourceId: sessionToken,
+      details: { 
+        deviceInfo: session.userAgent,
+        wasCurrentSession: isCurrentSession
+      },
+      ipAddress,
+      userAgent
+    });
+    
+    // Also log to security log (keeping existing for compatibility)
     await prisma.securityLog.create({
       data: {
         userId: decoded.userId,
@@ -56,8 +88,8 @@ export async function POST(request) {
           deviceInfo: session.userAgent,
           wasCurrentSession: isCurrentSession
         },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown',
+        ipAddress,
+        userAgent,
         success: true
       }
     });

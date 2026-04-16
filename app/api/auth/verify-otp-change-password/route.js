@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/security';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { sendPasswordChangedEmail, sendSecurityAlertEmail } from '@/lib/email/sendOtpEmail';
 
 export async function POST(request) {
@@ -38,6 +39,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     // Check if user is locked out from OTP attempts
     if (user.passwordChangeOtpLockout && user.passwordChangeOtpLockout > new Date()) {
       const remainingSeconds = Math.ceil((user.passwordChangeOtpLockout - new Date()) / 1000);
@@ -61,10 +65,20 @@ export async function POST(request) {
       if (newAttempts >= 3) {
         lockoutUntil = new Date(Date.now() + 60 * 1000);
         
+        // Log security event for account lockout
+        await logSecurityEvent({
+          userId: user.id,
+          action: SecurityActions.ACCOUNT_LOCKED,
+          ipAddress,
+          userAgent,
+          details: { reason: 'Too many failed OTP attempts', attempts: newAttempts },
+          success: false
+        });
+        
         await sendSecurityAlertEmail(user.email, user.firstName, 'otp_verification_failed', {
           attempts: newAttempts,
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          ipAddress,
+          userAgent
         });
       }
       
@@ -76,14 +90,24 @@ export async function POST(request) {
         }
       });
       
+      // Log security event for failed OTP
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.PASSWORD_CHANGE_OTP_FAILED,
+        ipAddress,
+        userAgent,
+        details: { attempts: newAttempts, locked: !!lockoutUntil },
+        success: false
+      });
+      
       await createAuditLog({
         userId: decoded.userId,
         action: 'PASSWORD_CHANGE_OTP_FAILED',
         resourceType: 'user',
         resourceId: decoded.userId,
         details: { attempts: newAttempts, locked: !!lockoutUntil },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        ipAddress,
+        userAgent
       });
       
       return NextResponse.json({ 
@@ -93,6 +117,25 @@ export async function POST(request) {
         remainingAttempts: newAttempts >= 3 ? 0 : 3 - newAttempts
       }, { status: 400 });
     }
+    
+    // Reset OTP attempts on successful verification
+    await prisma.user.update({
+      where: { id: decoded.userId },
+      data: {
+        passwordChangeOtpAttempts: 0,
+        passwordChangeOtpLockout: null
+      }
+    });
+    
+    // Log security event for OTP verified successfully
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.PASSWORD_CHANGE_OTP_VERIFIED,
+      ipAddress,
+      userAgent,
+      details: { otpVerified: true },
+      success: true
+    });
     
     // Validate new password strength
     const validation = validatePasswordStrength(newPassword);
@@ -116,6 +159,16 @@ export async function POST(request) {
       }
     });
     
+    // Log security event for successful password change
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.PASSWORD_CHANGED_SUCCESSFULLY,
+      ipAddress,
+      userAgent,
+      details: { method: 'OTP_VERIFIED', allSessionsInvalidated: true },
+      success: true
+    });
+    
     // Send password changed confirmation email
     await sendPasswordChangedEmail(user.email, user.firstName);
     
@@ -125,8 +178,8 @@ export async function POST(request) {
       resourceType: 'user',
       resourceId: decoded.userId,
       details: { method: 'OTP_VERIFIED' },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({

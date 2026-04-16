@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function GET(request) {
   try {
@@ -25,6 +27,9 @@ export async function GET(request) {
     if (!hasAdminAccess) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
     }
+    
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     // Get query parameters
     const { searchParams } = new URL(request.url);
@@ -62,6 +67,31 @@ export async function GET(request) {
       end.setHours(23, 59, 59, 999);
       where.timestamp = { ...where.timestamp, lte: end };
     }
+    
+    // Log security event for audit log access
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.AUDIT_LOG_ACCESS,
+      ipAddress,
+      userAgent,
+      details: { 
+        filters: { action, userId, resourceType, startDate, endDate },
+        limit,
+        offset
+      },
+      success: true
+    });
+    
+    // Create audit log for accessing audit logs
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.AUDIT_LOG_ACCESS,
+      resourceType: 'audit',
+      resourceId: null,
+      details: { filters: { action, userId, resourceType, startDate, endDate } },
+      ipAddress,
+      userAgent
+    });
     
     // Fetch audit logs
     const logs = await prisma.auditLog.findMany({

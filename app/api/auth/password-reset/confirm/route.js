@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { validatePasswordStrength, hashPassword, logSecurityEvent } from '@/lib/auth/security';
+import { logSecurityEvent as logSecurity, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { token, password } = body;
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
 
     console.log('[PASSWORD RESET CONFIRM] Token received:', token ? 'yes' : 'no');
 
@@ -23,6 +27,17 @@ export async function POST(request) {
 
     if (!user) {
       console.log('[PASSWORD RESET CONFIRM] Invalid or expired token');
+      
+      // Log security event for failed password reset attempt
+      await logSecurity({
+        userId: null,
+        action: SecurityActions.PASSWORD_CHANGE_FAILED,
+        ipAddress,
+        userAgent,
+        details: { reason: 'Invalid or expired token' },
+        success: false
+      });
+      
       return NextResponse.json({ error: 'Invalid or expired password reset link' }, { status: 400 });
     }
 
@@ -49,6 +64,27 @@ export async function POST(request) {
         failedLoginAttempts: 0,
         lockoutUntil: null
       }
+    });
+
+    // Log security event for successful password reset
+    await logSecurity({
+      userId: user.id,
+      action: SecurityActions.PASSWORD_CHANGED_SUCCESSFULLY,
+      ipAddress,
+      userAgent,
+      details: { method: 'PASSWORD_RESET_LINK' },
+      success: true
+    });
+
+    // Create audit log
+    await createAuditLog({
+      userId: user.id,
+      action: AuditActions.PASSWORD_CHANGED,
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { method: 'PASSWORD_RESET_LINK' },
+      ipAddress,
+      userAgent
     });
 
     await logSecurityEvent({

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { hashPassword, validatePasswordStrength, logSecurityEvent } from '@/lib/auth/security';
+import { logSecurityEvent as logSecurity, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
 import crypto from 'crypto';
 
@@ -8,6 +10,8 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const { firstName, lastName, email, password } = body;
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     // Validate input
     if (!firstName || !lastName || !email || !password) {
@@ -64,6 +68,27 @@ export async function POST(request) {
         verificationToken,
         verificationExpiry
       }
+    });
+    
+    // Log security event for user registration
+    await logSecurity({
+      userId: user.id,
+      action: SecurityActions.USER_REGISTERED,
+      ipAddress,
+      userAgent,
+      details: { email },
+      success: true
+    });
+    
+    // Create audit log
+    await createAuditLog({
+      userId: user.id,
+      action: AuditActions.USER_CREATED,
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { email, firstName, lastName },
+      ipAddress,
+      userAgent
     });
     
     // Send verification email

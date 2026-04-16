@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function GET(request) {
   try {
@@ -24,11 +26,38 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
     const userId = searchParams.get('userId');
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
+    
+    // Log security event for security log access
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.SECURITY_LOG_ACCESS,
+      ipAddress,
+      userAgent,
+      details: { 
+        filters: { action, userId },
+        limit,
+        offset
+      },
+      success: true
+    });
+    
+    // Create audit log for accessing security logs
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.SECURITY_LOG_ACCESS,
+      resourceType: 'security',
+      resourceId: null,
+      details: { filters: { action, userId } },
+      ipAddress,
+      userAgent
+    });
     
     let where = {};
     if (userId) where.userId = userId;

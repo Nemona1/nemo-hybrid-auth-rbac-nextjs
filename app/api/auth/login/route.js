@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyPassword, handleFailedLogin, resetFailedAttempts, logSecurityEvent } from '@/lib/auth/security';
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent as logSecurity, SecurityActions } from '@/lib/security-log';
 import { generateOtp, storeOtp, generateDeviceFingerprint } from '@/lib/auth/2fa';
 import { send2faOtpEmail } from '@/lib/email/send2faOtp';
 
@@ -29,6 +30,17 @@ export async function POST(request) {
     
     if (!user) {
       console.log('[LOGIN] User not found:', email);
+      
+      // Log security event for failed login (user not found)
+      await logSecurity({
+        userId: null,
+        action: SecurityActions.LOGIN_FAILED,
+        ipAddress,
+        userAgent,
+        details: { email, reason: 'User not found' },
+        success: false
+      });
+      
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
@@ -39,6 +51,17 @@ export async function POST(request) {
     if (user.lockoutUntil && user.lockoutUntil > new Date()) {
       const remainingSeconds = Math.ceil((user.lockoutUntil - new Date()) / 1000);
       console.log('[LOGIN] Account locked:', remainingSeconds);
+      
+      // Log security event for locked account attempt
+      await logSecurity({
+        userId: user.id,
+        action: SecurityActions.LOGIN_FAILED,
+        ipAddress,
+        userAgent,
+        details: { email, reason: 'Account locked', remainingSeconds },
+        success: false
+      });
+      
       return NextResponse.json(
         { error: `Account locked. Try again in ${remainingSeconds} seconds`, locked: true, lockoutTime: remainingSeconds },
         { status: 429 }
@@ -48,6 +71,16 @@ export async function POST(request) {
     // Check email verification
     if (!user.isVerified) {
       console.log('[LOGIN] Email not verified:', email);
+      
+      await logSecurity({
+        userId: user.id,
+        action: SecurityActions.LOGIN_FAILED,
+        ipAddress,
+        userAgent,
+        details: { email, reason: 'Email not verified' },
+        success: false
+      });
+      
       return NextResponse.json(
         { error: 'Please verify your email before logging in' },
         { status: 401 }
@@ -61,7 +94,27 @@ export async function POST(request) {
       console.log('[LOGIN] Invalid password for:', email);
       const result = await handleFailedLogin(email, ipAddress, userAgent);
       
+      // Log security event for failed password
+      await logSecurity({
+        userId: user.id,
+        action: SecurityActions.LOGIN_FAILED,
+        ipAddress,
+        userAgent,
+        details: { email, reason: 'Invalid password', attempts: result.remainingAttempts },
+        success: false
+      });
+      
       if (result.locked) {
+        // Log account lockout event
+        await logSecurity({
+          userId: user.id,
+          action: SecurityActions.ACCOUNT_LOCKED,
+          ipAddress,
+          userAgent,
+          details: { reason: 'Too many failed login attempts', lockoutTime: result.lockoutTime },
+          success: false
+        });
+        
         return NextResponse.json(
           { error: `Too many failed attempts. Account locked for ${result.lockoutTime} seconds`, locked: true, lockoutTime: result.lockoutTime },
           { status: 429 }
@@ -88,10 +141,29 @@ export async function POST(request) {
       const otp = generateOtp();
       storeOtp(user.id, otp);
       
+      // Log security event for 2FA code sent
+      await logSecurity({
+        userId: user.id,
+        action: SecurityActions.TWO_FACTOR_CODE_SENT,
+        ipAddress,
+        userAgent,
+        details: { email: user.email, method: 'EMAIL_OTP' },
+        success: true
+      });
+      
       // Send OTP email
       const emailSent = await send2faOtpEmail(user.email, otp, user.firstName);
       
       if (!emailSent) {
+        await logSecurity({
+          userId: user.id,
+          action: SecurityActions.TWO_FACTOR_CODE_SENT,
+          ipAddress,
+          userAgent,
+          details: { email: user.email, reason: 'Email send failed' },
+          success: false
+        });
+        
         return NextResponse.json(
           { error: 'Failed to send verification code. Please try again.' },
           { status: 500 }
@@ -179,6 +251,16 @@ export async function POST(request) {
     }
     
     console.log('[LOGIN] Successful for:', email, 'Redirect:', redirectUrl);
+    
+    // Log security event for successful login
+    await logSecurity({
+      userId: user.id,
+      action: SecurityActions.LOGIN_SUCCESS,
+      ipAddress,
+      userAgent,
+      details: { email, redirectUrl, twoFactorEnabled: false },
+      success: true
+    });
     
     // Create audit log
     await createAuditLog({

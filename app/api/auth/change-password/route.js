@@ -1,12 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyAccessToken, verifyPassword } from '@/lib/auth';
+import { verifyAccessToken } from '@/lib/auth/jwt';
 import { verifyPassword, hashPassword, validatePasswordStrength } from '@/lib/auth/security';
-import { createAuditLog } from '@/lib/audit';
+import { createAuditLog, AuditActions } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 
 export async function POST(request) {
   try {
     const { currentPassword, newPassword } = await request.json();
+    
+    if (!currentPassword || !newPassword) {
+      return NextResponse.json(
+        { error: 'Current password and new password are required' },
+        { status: 400 }
+      );
+    }
     
     let token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (!token) {
@@ -22,6 +30,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     // Get user with current password hash
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId }
@@ -34,6 +45,16 @@ export async function POST(request) {
     // Verify current password
     const isValid = await verifyPassword(currentPassword, user.passwordHash);
     if (!isValid) {
+      // Log security event for failed password change attempt
+      await logSecurityEvent({
+        userId: user.id,
+        action: SecurityActions.PASSWORD_CHANGE_FAILED_CURRENT_PASSWORD,
+        ipAddress,
+        userAgent,
+        details: { reason: 'Invalid current password' },
+        success: false
+      });
+      
       return NextResponse.json({ error: 'Current password is incorrect' }, { status: 401 });
     }
     
@@ -46,7 +67,7 @@ export async function POST(request) {
     // Hash new password
     const newPasswordHash = await hashPassword(newPassword);
     
-    // Update password and increment token version
+    // Update password and increment token version (invalidates all existing sessions)
     await prisma.user.update({
       where: { id: decoded.userId },
       data: {
@@ -55,19 +76,33 @@ export async function POST(request) {
       }
     });
     
+    // Log security event for successful password change
+    await logSecurityEvent({
+      userId: user.id,
+      action: SecurityActions.PASSWORD_CHANGED_SUCCESSFULLY,
+      ipAddress,
+      userAgent,
+      details: { 
+        passwordChanged: true,
+        allSessionsInvalidated: true
+      },
+      success: true
+    });
+    
+    // Create audit log
     await createAuditLog({
       userId: decoded.userId,
-      action: 'PASSWORD_CHANGED',
+      action: AuditActions.PASSWORD_CHANGED,
       resourceType: 'user',
       resourceId: decoded.userId,
-      details: {},
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      details: { passwordChanged: true },
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({
       success: true,
-      message: 'Password changed successfully'
+      message: 'Password changed successfully. You have been logged out from all devices.'
     });
     
   } catch (error) {

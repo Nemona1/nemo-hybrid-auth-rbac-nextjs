@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function POST(request) {
   try {
@@ -19,6 +21,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     // Get current session token
     const currentSessionToken = request.cookies.get('sessionToken')?.value;
     
@@ -30,14 +35,35 @@ export async function POST(request) {
       }
     });
     
-    // Log the action
+    // Log security event for revoking all other sessions
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ALL_OTHER_SESSIONS_REVOKED,
+      ipAddress,
+      userAgent,
+      details: { revokedCount: deletedSessions.count },
+      success: true
+    });
+    
+    // Create audit log
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.ALL_OTHER_SESSIONS_REVOKED,
+      resourceType: 'session',
+      resourceId: null,
+      details: { revokedCount: deletedSessions.count },
+      ipAddress,
+      userAgent
+    });
+    
+    // Also log to security log (keeping existing for compatibility)
     await prisma.securityLog.create({
       data: {
         userId: decoded.userId,
         action: 'ALL_OTHER_SESSIONS_REVOKED',
         details: { revokedCount: deletedSessions.count },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown',
+        ipAddress,
+        userAgent,
         success: true
       }
     });

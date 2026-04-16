@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
 import crypto from 'crypto';
 
 export async function PUT(request) {
   try {
     const { firstName, lastName, email } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     let token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (!token) {
@@ -71,10 +74,37 @@ export async function PUT(request) {
       updateData.verificationToken = verificationToken;
       updateData.verificationExpiry = verificationExpiry;
       
+      // Log security event for email change request
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.EMAIL_CHANGE_REQUESTED,
+        ipAddress,
+        userAgent,
+        details: { 
+          oldEmail: currentUser.email,
+          newEmail: email,
+          requiresReVerification: true
+        },
+        success: true
+      });
+      
       // Send verification email to new email address
       const emailSent = await sendVerificationEmail(email, verificationToken, firstName || currentUser.firstName);
       
       if (!emailSent) {
+        await logSecurityEvent({
+          userId: decoded.userId,
+          action: SecurityActions.EMAIL_CHANGE_REQUESTED,
+          ipAddress,
+          userAgent,
+          details: { 
+            oldEmail: currentUser.email,
+            newEmail: email,
+            reason: 'Email send failed'
+          },
+          success: false
+        });
+        
         return NextResponse.json({ 
           error: 'Failed to send verification email. Please try again.' 
         }, { status: 500 });
@@ -99,8 +129,8 @@ export async function PUT(request) {
         email: isEmailChanging ? email : undefined,
         oldEmail: isEmailChanging ? currentUser.email : undefined
       },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     // If email was changed, invalidate current session and require re-login

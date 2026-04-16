@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 
 export async function GET(request) {
   try {
@@ -44,6 +45,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const { userId, permissionId, isGranted = true, expiresAt } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!userId || !permissionId) {
       return NextResponse.json(
@@ -78,6 +81,12 @@ export async function POST(request) {
       select: { email: true, firstName: true, lastName: true }
     });
     
+    // Get target user info for security log
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true }
+    });
+    
     const userPermission = await prisma.userPermission.upsert({
       where: {
         userId_permissionId: {
@@ -99,6 +108,22 @@ export async function POST(request) {
       }
     });
     
+    // Log security event for permission change
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: isGranted ? SecurityActions.PERMISSION_GRANTED : SecurityActions.PERMISSION_REVOKED,
+      ipAddress,
+      userAgent,
+      details: {
+        targetUserId: userId,
+        targetUserEmail: targetUser?.email,
+        permissionId,
+        isGranted,
+        expiresAt
+      },
+      success: true
+    });
+    
     // Create audit log
     await createAuditLog({
       userId: decoded.userId,
@@ -112,8 +137,8 @@ export async function POST(request) {
         expiresAt,
         adminEmail: adminUser?.email
       },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({
@@ -136,6 +161,8 @@ export async function DELETE(request) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const permissionId = searchParams.get('permissionId');
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!userId || !permissionId) {
       return NextResponse.json(
@@ -164,6 +191,12 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
     }
     
+    // Get target user info for security log
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true }
+    });
+    
     await prisma.userPermission.delete({
       where: {
         userId_permissionId: {
@@ -171,6 +204,20 @@ export async function DELETE(request) {
           permissionId
         }
       }
+    });
+    
+    // Log security event for permission removal
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.PERMISSION_REMOVED,
+      ipAddress,
+      userAgent,
+      details: {
+        targetUserId: userId,
+        targetUserEmail: targetUser?.email,
+        permissionId
+      },
+      success: true
     });
     
     // Create audit log
@@ -183,8 +230,8 @@ export async function DELETE(request) {
         targetUserId: userId,
         permissionId
       },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({

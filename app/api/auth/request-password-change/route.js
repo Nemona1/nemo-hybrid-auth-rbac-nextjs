@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken, verifyPassword } from '@/lib/auth';
 import { sendPasswordChangeOtp } from '@/lib/email/sendOtpEmail';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import crypto from 'crypto';
 
 export async function POST(request) {
@@ -35,6 +36,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     // Check if user is locked out from OTP attempts
     if (user.passwordChangeOtpLockout && user.passwordChangeOtpLockout > new Date()) {
       const remainingSeconds = Math.ceil((user.passwordChangeOtpLockout - new Date()) / 1000);
@@ -56,11 +60,21 @@ export async function POST(request) {
       if (newAttempts >= 3) {
         lockoutUntil = new Date(Date.now() + 60 * 1000); // 1 minute lockout
         
+        // Log security event for account lockout
+        await logSecurityEvent({
+          userId: user.id,
+          action: SecurityActions.ACCOUNT_LOCKED,
+          ipAddress,
+          userAgent,
+          details: { reason: 'Too many failed password change attempts', attempts: newAttempts },
+          success: false
+        });
+        
         // Send security alert email
         await sendSecurityAlertEmail(user.email, user.firstName, 'password_change_attempt', {
           attempts: newAttempts,
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          ipAddress: ipAddress,
+          userAgent: userAgent
         });
       }
       
@@ -72,14 +86,24 @@ export async function POST(request) {
         }
       });
       
+      // Log security event for failed password verification
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.PASSWORD_CHANGE_FAILED_CURRENT_PASSWORD,
+        ipAddress,
+        userAgent,
+        details: { attempts: newAttempts, locked: !!lockoutUntil },
+        success: false
+      });
+      
       await createAuditLog({
         userId: decoded.userId,
         action: 'PASSWORD_CHANGE_FAILED_CURRENT_PASSWORD',
         resourceType: 'user',
         resourceId: decoded.userId,
         details: { attempts: newAttempts, locked: !!lockoutUntil },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        ipAddress: ipAddress,
+        userAgent: userAgent
       });
       
       const remainingAttempts = 3 - newAttempts;
@@ -117,8 +141,28 @@ export async function POST(request) {
     const emailSent = await sendPasswordChangeOtp(user.email, otp, user.firstName);
     
     if (!emailSent) {
+      // Log security event for failed OTP send
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.PASSWORD_CHANGE_OTP_SENT,
+        ipAddress,
+        userAgent,
+        details: { emailSent: false, reason: 'Email send failed' },
+        success: false
+      });
+      
       return NextResponse.json({ error: 'Failed to send verification code' }, { status: 500 });
     }
+    
+    // Log security event for OTP sent successfully
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.PASSWORD_CHANGE_OTP_SENT,
+      ipAddress,
+      userAgent,
+      details: { emailSent: true, expiryMinutes: 10 },
+      success: true
+    });
     
     await createAuditLog({
       userId: decoded.userId,
@@ -126,8 +170,8 @@ export async function POST(request) {
       resourceType: 'user',
       resourceId: decoded.userId,
       details: { expiryMinutes: 10 },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress: ipAddress,
+      userAgent: userAgent
     });
     
     return NextResponse.json({

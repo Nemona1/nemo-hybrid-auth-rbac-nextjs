@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { sendRoleApplicationSubmittedEmail } from '@/lib/email/roleDecisionEmail';
 
 export async function POST(request) {
   try {
     const { requestedRoleId, justification } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     // Validate input
     if (!requestedRoleId) {
@@ -74,6 +77,19 @@ export async function POST(request) {
       data: { applicationStatus: 'PENDING' }
     });
     
+    // Log security event for role application submission
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ROLE_APPLICATION_SUBMITTED,
+      ipAddress,
+      userAgent,
+      details: {
+        requestedRole: requestedRole.name,
+        justification: justification ? justification.substring(0, 100) : null
+      },
+      success: true
+    });
+    
     // Send confirmation email to user
     await sendRoleApplicationSubmittedEmail(
       user.email,
@@ -89,8 +105,8 @@ export async function POST(request) {
       resourceType: 'role_application',
       resourceId: application.id,
       details: { requestedRoleId, justification, roleName: requestedRole.name },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({ 
@@ -120,6 +136,9 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     const application = await prisma.roleApplication.findUnique({
       where: { userId: decoded.userId },
       include: {
@@ -140,6 +159,20 @@ export async function GET(request) {
     } catch (err) {
       console.log('Rejection history not available');
     }
+    
+    // Log security event for viewing application status
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.ROLE_APPLICATION_STATUS_VIEWED,
+      ipAddress,
+      userAgent,
+      details: {
+        hasApplication: !!application,
+        applicationStatus: application?.status,
+        rejectionCount: rejections.length
+      },
+      success: true
+    });
     
     return NextResponse.json({ application, rejections });
     

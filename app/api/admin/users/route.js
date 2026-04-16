@@ -4,6 +4,7 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
 import { sendRoleApprovalEmail, sendRoleRejectionEmail } from '@/lib/email/roleDecisionEmail';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 
 export async function GET(request) {
   try {
@@ -71,6 +72,8 @@ export async function GET(request) {
 export async function PUT(request) {
   try {
     const { userId, roleId, applicationStatus, applicationId, reviewReason } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     let token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (!token) {
@@ -94,15 +97,36 @@ export async function PUT(request) {
     // Get admin user info for email
     const adminUser = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { firstName: true, lastName: true }
+      select: { firstName: true, lastName: true, email: true }
     });
     const adminName = `${adminUser?.firstName || 'System'} ${adminUser?.lastName || 'Administrator'}`;
+    
+    // Get target user info for security log
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, firstName: true, lastName: true }
+    });
     
     // Update user role
     if (roleId) {
       await prisma.user.update({
         where: { id: userId },
         data: { roleId }
+      });
+      
+      // Log security event for role assignment
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.ROLE_ASSIGNED,
+        ipAddress,
+        userAgent,
+        details: {
+          targetUserId: userId,
+          targetUserEmail: targetUser?.email,
+          newRoleId: roleId,
+          assignedBy: adminUser?.email
+        },
+        success: true
       });
     }
     
@@ -132,6 +156,21 @@ export async function PUT(request) {
           }
         });
         
+        // Log security event for role application approval
+        await logSecurityEvent({
+          userId: decoded.userId,
+          action: SecurityActions.ROLE_APPLICATION_APPROVED,
+          ipAddress,
+          userAgent,
+          details: {
+            targetUserId: userId,
+            targetUserEmail: application.user.email,
+            requestedRole: application.requestedRole.name,
+            reason: reviewReason
+          },
+          success: true
+        });
+        
         // Send approval email
         await sendRoleApprovalEmail(
           application.user.email,
@@ -148,14 +187,29 @@ export async function PUT(request) {
           resourceType: 'role_application',
           resourceId: applicationId,
           details: { userId, roleId: application.requestedRoleId, reason: reviewReason },
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          ipAddress,
+          userAgent
         });
         
       } else if (applicationStatus === 'REJECTED') {
         await prisma.user.update({
           where: { id: userId },
           data: { applicationStatus: 'REJECTED' }
+        });
+        
+        // Log security event for role application rejection
+        await logSecurityEvent({
+          userId: decoded.userId,
+          action: SecurityActions.ROLE_APPLICATION_REJECTED,
+          ipAddress,
+          userAgent,
+          details: {
+            targetUserId: userId,
+            targetUserEmail: application.user.email,
+            requestedRole: application.requestedRole.name,
+            reason: reviewReason
+          },
+          success: true
         });
         
         // Store rejection history (if model exists)
@@ -192,8 +246,8 @@ export async function PUT(request) {
           resourceType: 'role_application',
           resourceId: applicationId,
           details: { userId, roleId: application.requestedRoleId, reason: reviewReason },
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          ipAddress,
+          userAgent
         });
       }
     }

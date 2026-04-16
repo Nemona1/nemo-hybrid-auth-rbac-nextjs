@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth';
 import { createAuditLog } from '@/lib/audit';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { sendSecurityAlertEmail } from '@/lib/email/sendOtpEmail';
 
 export async function POST(request) {
   try {
     const { otp } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     if (!otp) {
       return NextResponse.json({ error: 'Verification code is required' }, { status: 400 });
@@ -61,15 +64,35 @@ export async function POST(request) {
         lockoutUntil = new Date(Date.now() + 60 * 1000); // 1 minute lockout
         responseMessage = 'Account temporarily locked due to too many failed attempts.';
         
+        // Log security event for account lockout
+        await logSecurityEvent({
+          userId: user.id,
+          action: SecurityActions.ACCOUNT_LOCKED,
+          ipAddress,
+          userAgent,
+          details: { reason: 'Too many failed OTP verification attempts', attempts: newAttempts },
+          success: false
+        });
+        
         // Send security alert email
         await sendSecurityAlertEmail(user.email, user.firstName, 'otp_verification_failed', {
           attempts: newAttempts,
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          ipAddress,
+          userAgent
         });
       } else {
         responseMessage = `${3 - newAttempts} attempt(s) remaining before account lockout.`;
       }
+      
+      // Log security event for failed OTP
+      await logSecurityEvent({
+        userId: user.id,
+        action: SecurityActions.PASSWORD_CHANGE_OTP_FAILED,
+        ipAddress,
+        userAgent,
+        details: { attempts: newAttempts, locked: !!lockoutUntil },
+        success: false
+      });
       
       await prisma.user.update({
         where: { id: decoded.userId },
@@ -85,8 +108,8 @@ export async function POST(request) {
         resourceType: 'user',
         resourceId: decoded.userId,
         details: { attempts: newAttempts, locked: !!lockoutUntil },
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        ipAddress,
+        userAgent
       });
       
       return NextResponse.json({ 
@@ -94,6 +117,16 @@ export async function POST(request) {
         remainingAttempts: newAttempts >= 3 ? 0 : 3 - newAttempts
       }, { status: 400 });
     }
+    
+    // Log security event for successful OTP verification
+    await logSecurityEvent({
+      userId: user.id,
+      action: SecurityActions.PASSWORD_CHANGE_OTP_VERIFIED,
+      ipAddress,
+      userAgent,
+      details: { otpVerified: true },
+      success: true
+    });
     
     // Reset OTP attempts on successful verification
     await prisma.user.update({
@@ -110,8 +143,8 @@ export async function POST(request) {
       resourceType: 'user',
       resourceId: decoded.userId,
       details: { otpVerified: true },
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown'
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({

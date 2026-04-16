@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { hasPermission } from '@/lib/auth/permissions';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function GET(request) {
   try {
@@ -24,9 +26,32 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type') || 'all';
     const format = searchParams.get('format') || 'csv';
+    
+    // Log security event for audit export
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.AUDIT_EXPORT,
+      ipAddress,
+      userAgent,
+      details: { type, format },
+      success: true
+    });
+    
+    // Create audit log for export action
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.AUDIT_EXPORT,
+      resourceType: 'audit',
+      resourceId: null,
+      details: { type, format },
+      ipAddress,
+      userAgent
+    });
     
     // Fetch all logs without pagination for export
     let auditLogs = [];

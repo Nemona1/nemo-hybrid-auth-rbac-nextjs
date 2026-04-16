@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
+import { createAuditLog, AuditActions } from '@/lib/audit';
 
 export async function POST(request) {
   try {
@@ -20,6 +22,9 @@ export async function POST(request) {
     if (!valid) {
       return NextResponse.json({ success: true, note: 'Invalid token' });
     }
+    
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
     
     // Update user's last activity
     await prisma.user.update({
@@ -42,8 +47,8 @@ export async function POST(request) {
         sessionToken,
         lastActivity: new Date(),
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        ipAddress,
+        userAgent
       }
     });
     
@@ -81,9 +86,12 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
+    const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
+    const userAgent = request.headers.get('user-agent') || 'unknown';
+    
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { lastActivityAt: true }
+      select: { lastActivityAt: true, email: true }
     });
     
     const sessions = await prisma.session.findMany({
@@ -92,6 +100,27 @@ export async function GET(request) {
         expiresAt: { gt: new Date() }
       },
       orderBy: { lastActivity: 'desc' }
+    });
+    
+    // Log security event for viewing sessions
+    await logSecurityEvent({
+      userId: decoded.userId,
+      action: SecurityActions.SESSIONS_VIEWED,
+      ipAddress,
+      userAgent,
+      details: { activeSessionCount: sessions.length },
+      success: true
+    });
+    
+    // Create audit log
+    await createAuditLog({
+      userId: decoded.userId,
+      action: AuditActions.SESSIONS_VIEWED,
+      resourceType: 'session',
+      resourceId: null,
+      details: { activeSessionCount: sessions.length },
+      ipAddress,
+      userAgent
     });
     
     return NextResponse.json({
