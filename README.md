@@ -126,7 +126,7 @@ markdown
 
 ### One-Command Setup
 
-```bash
+
 git clone https://github.com/yourusername/nemo-hybrid-auth-rbac-nextjs.git
 cd nemo-hybrid-auth-rbac-nextjs
 cp .env.example .env
@@ -134,20 +134,20 @@ npm install
 npx prisma db push
 npm run db:seed
 npm run dev
-##📦 Installation
+## 📦 Installation
 
-##Step 1: Clone the Repository
+## Step 1: Clone the Repository
 
 git clone https://github.com/yourusername/nemo-hybrid-auth-rbac-nextjs.git
 cd nemo-hybrid-auth-rbac-nextjs
 
-##Step 2: Install Dependencies
+## Step 2: Install Dependencies
 npm install
 
-##Step 3: Configure Environment Variables
+## Step 3: Configure Environment Variables
 cp .env.example .env
 
-##Edit .env with your database and email credentials:
+## Edit .env with your database and email credentials:
 
 # Database
 DATABASE_URL="postgresql://user:password@localhost:5432/nemo_auth"
@@ -185,7 +185,7 @@ npx prisma generate
 # Seed database with roles and demo users
 npm run db:seed
 
-##Step 5: Start Development Server
+##S tep 5: Start Development Server
 
 npm run dev
 
@@ -208,7 +208,7 @@ Visit http://localhost:3000
 | `INACTIVITY_TIMEOUT_SECONDS` | Session timeout in seconds | ❌ | `60` |
 | `NODE_ENV` | Environment | ❌ | `development` |
 
-##🗄️ Database Setup
+## 🗄️ Database Setup
 # Create database
 createdb nemo_auth
 
@@ -218,18 +218,14 @@ npx prisma db push
 # Seed data
 npm run db:seed
 
-##Using Neon (Serverless PostgreSQL)
-Create account at Neon Console
+## Using Neon (Serverless PostgreSQL)
+1. Create account at Neon Console
+2. Create a new project
+3. Copy connection string
+4. Add `?sslmode=require` to the connection string
+5. Update `DATABASE_URL` in .env
 
-Create a new project
-
-Copy connection string
-
-Add ?sslmode=require to the connection string
-
-Update DATABASE_URL in .env
-
-##Database Management Commands
+## Database Management Commands
 
 # Push schema changes (preserves data)
 npx prisma db push
@@ -244,7 +240,7 @@ npm run db:seed
 npm run db:studio
 
 
-##🔄 Authentication Flow
+## 🔄 Authentication Flow
 Registration Flow
 
 1. User submits registration form
@@ -259,7 +255,7 @@ Registration Flow
          ↓
 6. Email verified → User can now login
 
-##Login Flow (with 2FA)
+## Login Flow (with 2FA)
 
 1. User enters email & password
          ↓
@@ -276,7 +272,7 @@ Registration Flow
          ↓
 6. Redirects to role-specific dashboard
 
-Password Reset Flow
+## Password Reset Flow
 
 1. User requests password reset
          ↓
@@ -288,8 +284,8 @@ Password Reset Flow
          ↓
 5. Password updated → All sessions invalidated
 
-##🎯 Authorization System
-System Roles
+## 🎯 Authorization System
+### System Roles
 ## Roles & Permissions
 
 | Role | Description | Permissions |
@@ -299,7 +295,7 @@ System Roles
 | `EDITOR` | Content management | `content:create/edit/view` |
 | `VIEWER` | Read-only access | `content:view` |
 
-##Permission Categories
+
 ## Permissions by Category
 
 ### User Management
@@ -339,17 +335,16 @@ System Roles
 | `admin:access` | Access admin panel |
 | `audit:read` | View audit logs |
 
-##Hybrid Logic
+## Hybrid Logic
 
-Permission Check Order:
-Permission Check Order:
+## Permission Check Order:
 1. Check Direct Deny → If found, DENY
 2. Check Direct Grant → If found, ALLOW
 3. Check Role Permissions → If found, ALLOW
 4. Default → DENY
 
-##🔐 Two-Factor Authentication (2FA)
-Features
+## 🔐 Two-Factor Authentication (2FA)
+### Features
 ✅ Email-based OTP - 6-digit code sent to registered email
 
 ✅ Backup Codes - 10 one-time use backup codes
@@ -360,7 +355,7 @@ Features
 
 ✅ Audit Logging - All 2FA events logged
 
-##Setup Flow
+## Setup Flow
 
 1. User clicks "Enable 2FA" toggle
          ↓
@@ -376,7 +371,7 @@ Features
          ↓
 7. Backup codes displayed (save them!)
 
-##Login with 2FA
+## Login with 2FA
 
 1. User enters email & password
          ↓
@@ -453,7 +448,7 @@ Features
 | `POST` | `/api/user/revoke-session` | Revoke specific session |
 | `POST` | `/api/user/revoke-all-sessions` | Revoke all other sessions |
 
-## Project Structure
+Project Structure
 nemo-hybrid-auth-rbac-nextjs/
 ├── app/
 │   ├── api/                      # API routes
@@ -492,8 +487,8 @@ nemo-hybrid-auth-rbac-nextjs/
 ├── .env.example                  # Environment variables template
 └── package.json                  # Dependencies
 ```
-## 🔒 Security Features
 
+## 🔒 Security Features
 ### Implemented Security Measures
 
 | Attack Vector | Mitigation Strategy | Implementation |

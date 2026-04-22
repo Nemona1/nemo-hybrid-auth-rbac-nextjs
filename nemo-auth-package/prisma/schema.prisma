@@ -1,0 +1,260 @@
+// Prisma Schema for Nemo-Hybrid-Auth-RBAC-NextJS
+// Enterprise-grade authentication with hybrid RBAC/PBAC
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core User Model with security features
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  firstName         String
+  lastName          String
+  passwordHash      String
+  isVerified          Boolean   @default(false)
+  verificationToken   String?   @unique
+  verificationExpiry  DateTime?
+
+    // OTP for password change
+  passwordChangeOtp     String?
+  passwordChangeOtpExpiry DateTime?
+  
+  // OTP attempt tracking for rate limiting
+  passwordChangeOtpAttempts  Int     @default(0)
+  passwordChangeOtpLockout   DateTime?
+
+  // 2FA Fields
+  twoFactorEnabled       Boolean   @default(false)
+  twoFactorSecret        String?   // Encrypted secret for TOTP (future Google Authenticator)
+  twoFactorBackupCodes   String?   // JSON array of hashed backup codes
+
+   twoFactorOtp         String?
+  twoFactorOtpExpiry   DateTime?
+  twoFactorOtpAttempts Int       @default(0)
+  
+  // Trusted Devices
+  trustedDevices         TrustedDevice[]
+
+  passwordResetToken  String?   @unique
+  passwordResetExpiry DateTime?
+  
+  // Role Management
+  roleId              String?
+  role                Role?     @relation(fields: [roleId], references: [id])
+  
+  // Direct Permissions (PBAC override)
+  directPermissions UserPermission[]
+  
+  // Application Status
+  roleApplication   RoleApplication?
+  applicationStatus ApplicationStatus @default(PENDING)
+  
+  // Security Features
+  failedLoginAttempts  Int       @default(0)
+  lockoutUntil         DateTime?
+  lastLoginAt          DateTime?
+  lastActivityAt       DateTime?
+  refreshTokenVersion  Int       @default(0)
+  
+  // Sessions
+  sessions          Session[]
+  
+  // Audit Logs
+  auditLogs         AuditLog[]
+
+    // Security Logs - ADD THIS LINE
+  securityLogs      SecurityLog[]
+
+   roleApplicationRejections RoleApplicationRejection[]
+  
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@map("users")
+}
+
+// Role Model for RBAC
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem     Boolean  @default(false) // Prevent deletion of system roles
+  
+  users       User[]
+  permissions RolePermission[]
+  roleApplications RoleApplication[]
+    roleApplicationRejections RoleApplicationRejection[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("roles")
+}
+
+// Permission Model (Granular permissions)
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique // Format: "resource:action" e.g., "users:create"
+  description String?
+  category    String   // "user", "content", "system", "admin"
+  
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+  
+  createdAt DateTime @default(now())
+  
+  @@map("permissions")
+}
+
+// Junction table for Role-Permission many-to-many
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  permissionId String
+  grantedAt    DateTime   @default(now())
+  grantedBy    String?    // Admin ID who granted this
+  
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Junction table for User-DirectPermission (PBAC override)
+model UserPermission {
+  id           String     @id @default(cuid())
+  userId       String
+  permissionId String
+  isGranted    Boolean    @default(true) // false = explicitly denied (override)
+  grantedAt    DateTime   @default(now())
+  grantedBy    String?    // Admin ID
+  expiresAt    DateTime?  // Optional expiration for temporary permissions
+  
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, permissionId])
+  @@map("user_permissions")
+}
+
+// Role Application System
+model RoleApplication {
+  id          String           @id @default(cuid())
+  userId      String           @unique
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedRoleId String
+  requestedRole   Role          @relation(fields: [requestedRoleId], references: [id])
+  justification   String?
+  status      ApplicationStatus @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reviewedReason String?
+   rejections RoleApplicationRejection[]
+  createdAt   DateTime         @default(now())
+  
+  @@map("role_applications")
+}
+
+// Role Application Rejection History - Add this at the end of your schema
+model RoleApplicationRejection {
+  id                String   @id @default(cuid())
+  roleApplicationId String
+  roleApplication   RoleApplication @relation(fields: [roleApplicationId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedRoleId   String
+  requestedRole     Role     @relation(fields: [requestedRoleId], references: [id])
+  reason            String
+  rejectedBy        String
+  rejectedAt        DateTime @default(now())
+  
+  @@index([userId])
+  @@index([roleApplicationId])
+  @@index([requestedRoleId])
+  @@map("role_application_rejections")
+}
+
+// Security Logs for Audit Trail
+// Security Logs for Audit Trail
+model SecurityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // "LOGIN_ATTEMPT", "ROLE_CHANGE", "PERMISSION_GRANT", etc.
+  ipAddress String?
+  userAgent String?
+  details   Json?
+  success   Boolean
+  createdAt DateTime @default(now())
+  
+  // Add this relation
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId, createdAt])
+  @@map("security_logs")
+}
+
+// Audit Logs for all user actions
+model AuditLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  action       String    // LOGIN, LOGOUT, ROLE_REQUEST, ROLE_APPROVE, ROLE_REJECT, PERMISSION_GRANT, PERMISSION_REVOKE
+  resourceType String    // 'user', 'role', 'permission', 'role_application', 'audit'
+  resourceId   String?
+  details      Json?     // Flexible JSON data for action details
+  ipAddress    String?
+  userAgent    String?
+  timestamp    DateTime  @default(now())
+  
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId, timestamp])
+  @@index([action, timestamp])
+  @@map("audit_logs")
+}
+
+model TrustedDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId    String   // Unique device fingerprint
+  deviceName  String   // User-provided name or auto-generated
+  deviceType  String   // 'browser', 'mobile', 'desktop'
+  ipAddress   String?
+  userAgent   String?
+  lastUsedAt  DateTime @default(now())
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  
+  @@unique([userId, deviceId])
+  @@index([userId, expiresAt])
+  @@map("trusted_devices")
+}
+
+// Session Tracking (for inactivity enforcement)
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  sessionToken String   @unique
+  lastActivity DateTime @default(now())
+  expiresAt    DateTime
+  ipAddress    String?
+  userAgent    String?
+  
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
