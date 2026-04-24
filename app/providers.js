@@ -66,17 +66,7 @@ export function ThemeProvider({ children }) {
     }
   };
 
-  return (
-    <>
-      {children}
-      {/* Theme toggle button - you can place this anywhere */}
-      <button
-        onClick={toggleTheme}
-        className="fixed bottom-4 right-4 p-3 bg-card border border-border rounded-full shadow-lg hover:scale-110 transition-all duration-200 z-50"
-        aria-label="Toggle theme"
-      >
-        {theme === 'light' ? '🌙' : '☀️'}
-      </button>
-    </>
-  );
+  // Provide toggleTheme function to children via context if needed
+  // The actual theme toggle button should be in your Navbar component
+  return <>{children}</>;
 }

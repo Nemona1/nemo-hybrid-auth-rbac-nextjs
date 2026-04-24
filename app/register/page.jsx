@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import { User, Mail, Lock, Eye, EyeOff, UserPlus, Rocket, Chrome } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff, UserPlus, Rocket } from 'lucide-react';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 
 // Demo account for development
@@ -66,12 +66,6 @@ export default function RegisterPage() {
     toast.success('Demo account loaded!');
   };
 
-  // Google Sign-In handler
-  const handleGoogleSignIn = () => {
-    // Redirect to Google OAuth endpoint
-    window.location.href = '/api/auth/google';
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8 relative">
       <div className="absolute top-4 right-4">
@@ -91,26 +85,6 @@ export default function RegisterPage() {
           <p className="mt-2 text-center text-sm text-muted">
             Join Nemo Auth today
           </p>
-        </div>
-        
-        {/* Google Sign-In Button */}
-        <button
-          type="button"
-          onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center gap-3 px-4 py-2 border border-border rounded-lg hover:bg-primary/5 transition-all duration-200"
-        >
-          <Chrome className="h-5 w-5 text-primary" />
-          <span className="text-sm font-medium text-foreground">Sign up with Google</span>
-        </button>
-        
-        {/* Divider */}
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-border"></div>
-          </div>
-          <div className="relative flex justify-center text-xs">
-            <span className="px-2 bg-background text-muted">Or continue with email</span>
-          </div>
         </div>
         
         {/* Demo Account Button - Development Only */}

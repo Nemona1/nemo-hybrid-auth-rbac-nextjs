@@ -30,7 +30,6 @@ export default function LoginPage() {
     password: ''
   });
 
-  // Live countdown timer for lockout
   useEffect(() => {
     let interval;
     if (lockoutInfo.isLocked && lockoutInfo.remainingSeconds > 0) {
@@ -50,15 +49,10 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, [lockoutInfo.isLocked, lockoutInfo.remainingSeconds]);
 
-  // Handle URL parameters (verification success, errors, session expired)
   useEffect(() => {
     const verified = searchParams.get('verified');
     if (verified === 'true') {
-      toast.success('Email verified successfully! You can now log in.', {
-        duration: 5000,
-        position: 'top-center',
-        icon: '✅'
-      });
+      toast.success('Email verified successfully! You can now log in.', { duration: 5000 });
       const url = new URL(window.location.href);
       url.searchParams.delete('verified');
       window.history.replaceState({}, '', url);
@@ -66,48 +60,31 @@ export default function LoginPage() {
     
     const error = searchParams.get('error');
     if (error === 'invalid_verification_token') {
-      toast.error('Invalid verification link. Please register again.', {
-        duration: 5000,
-        position: 'top-center'
-      });
+      toast.error('Invalid verification link. Please register again.', { duration: 5000 });
       const url = new URL(window.location.href);
       url.searchParams.delete('error');
       window.history.replaceState({}, '', url);
     }
     
-    // Handle session expired due to inactivity
     const expired = searchParams.get('expired');
     if (expired === 'true') {
-      toast.error('Your session expired due to inactivity. Please login again.', {
-        duration: 6000,
-        position: 'top-center',
-        icon: '⏰'
-      });
+      toast('⏰ Your session expired due to inactivity. Please login again.', { duration: 6000 });
       const url = new URL(window.location.href);
       url.searchParams.delete('expired');
       window.history.replaceState({}, '', url);
     }
     
-    // Handle account locked
     const locked = searchParams.get('locked');
     if (locked === 'true') {
-      toast.error('Your account has been temporarily locked due to multiple failed attempts. Please try again later.', {
-        duration: 6000,
-        position: 'top-center',
-        icon: '🔒'
-      });
+      toast.error('Your account has been temporarily locked. Please try again later.', { duration: 6000 });
       const url = new URL(window.location.href);
       url.searchParams.delete('locked');
       window.history.replaceState({}, '', url);
     }
     
-    // Handle email verification required after email change
     const emailVerificationRequired = searchParams.get('email_verification_required');
     if (emailVerificationRequired === 'true') {
-      toast('📧 Please verify your new email address before logging in. Check your inbox for the verification link.', {
-        duration: 8000,
-        position: 'top-center'
-      });
+      toast('📧 Please verify your new email address before logging in.', { duration: 8000 });
       const url = new URL(window.location.href);
       url.searchParams.delete('email_verification_required');
       window.history.replaceState({}, '', url);
@@ -134,15 +111,8 @@ export default function LoginPage() {
 
       const data = await res.json();
 
-      // Handle 2FA required response
       if (data.requiresTwoFactor) {
-        // FIXED: Use toast instead of toast.info
-        toast(data.message || 'Verification code sent to your email', {
-          duration: 5000,
-          position: 'top-center',
-          icon: '🔐'
-        });
-        // Store temp session info and redirect to 2FA verification page
+        toast(data.message || '🔐 Verification code sent to your email', { duration: 5000 });
         sessionStorage.setItem('temp2faEmail', formData.email);
         router.push('/verify-2fa');
         return;
@@ -151,12 +121,7 @@ export default function LoginPage() {
       if (res.ok && data.accessToken) {
         localStorage.setItem('accessToken', data.accessToken);
         localStorage.setItem('refreshToken', data.refreshToken);
-        
-        toast.success('Login successful! Redirecting...', {
-          duration: 2000,
-          position: 'top-center',
-          icon: '🎉'
-        });
+        toast.success('Login successful! Redirecting...', { duration: 2000 });
         window.location.href = data.redirectUrl || '/dashboard';
       } else {
         if (data.locked) {
@@ -174,18 +139,10 @@ export default function LoginPage() {
           });
           toast.error(data.error);
           if (data.remainingAttempts === 1) {
-            toast.warning('Warning: Last attempt before account lockout!', {
-              duration: 4000,
-              position: 'top-center',
-              icon: '⚠️'
-            });
+            toast('⚠️ Warning: Last attempt before account lockout!', { duration: 4000 });
           }
         } else if (data.error === 'Please verify your email before logging in') {
-          toast.error(data.error, {
-            duration: 5000,
-            position: 'top-center',
-            icon: '📧'
-          });
+          toast.error(data.error, { duration: 5000 });
           setLoading(false);
         } else {
           toast.error(data.error || 'Login failed');
@@ -193,7 +150,6 @@ export default function LoginPage() {
         setLoading(false);
       }
     } catch (error) {
-      console.error('Login error:', error);
       toast.error('Network error. Please try again.');
       setLoading(false);
     }
@@ -214,11 +170,7 @@ export default function LoginPage() {
 
   const fillDemoAccount = (email, password) => {
     setFormData({ email, password });
-    toast.success(`Demo account loaded: ${email.split('@')[0]}`, {
-      duration: 2000,
-      position: 'top-center',
-      icon: '🚀'
-    });
+    toast.success(`🚀 Demo account loaded: ${email.split('@')[0]}`, { duration: 2000 });
   };
 
   return (
@@ -236,7 +188,6 @@ export default function LoginPage() {
           <p className="text-muted mt-2">Sign in to your account</p>
         </div>
         
-        {/* Lockout Alert Banner */}
         {lockoutInfo.isLocked && (
           <div className="mb-6 bg-error/10 border-2 border-error/30 rounded-lg p-4 animate-pulse">
             <div className="flex items-center gap-3">
@@ -254,7 +205,6 @@ export default function LoginPage() {
           </div>
         )}
         
-        {/* Remaining Attempts Warning */}
         {!lockoutInfo.isLocked && lockoutInfo.remainingAttempts !== null && lockoutInfo.remainingAttempts > 0 && (
           <div className="mb-6 bg-warning/10 border-2 border-warning/30 rounded-lg p-4">
             <div className="flex items-center gap-3">
@@ -271,7 +221,6 @@ export default function LoginPage() {
           </div>
         )}
         
-        {/* 2FA Info Banner */}
         <div className="mb-6 bg-primary/5 border border-primary/20 rounded-lg p-3">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-primary" />
@@ -281,7 +230,6 @@ export default function LoginPage() {
           </div>
         </div>
         
-        {/* Demo Accounts Section */}
         <div className="mb-8">
           <p className="text-sm text-muted text-center mb-3">Quick Demo Access</p>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
@@ -308,9 +256,7 @@ export default function LoginPage() {
         
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1">
-              Email Address
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1">Email Address</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted" />
               <input
@@ -327,9 +273,7 @@ export default function LoginPage() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1">Password</label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted" />
               <input

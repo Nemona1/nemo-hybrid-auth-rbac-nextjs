@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyPassword, handleFailedLogin, resetFailedAttempts, logSecurityEvent } from '@/lib/auth/security';
+import { verifyPassword, handleFailedLogin, resetFailedAttempts } from '@/lib/auth/security';
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt';
 import { createAuditLog } from '@/lib/audit';
-import { logSecurityEvent as logSecurity, SecurityActions } from '@/lib/security-log';
+import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { generateOtp, storeOtp, generateDeviceFingerprint } from '@/lib/auth/2fa';
 import { send2faOtpEmail } from '@/lib/email/send2faOtp';
 
@@ -13,8 +13,6 @@ export async function POST(request) {
     const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
     const userAgent = request.headers.get('user-agent') || 'unknown';
     
-    console.log('[LOGIN] Attempting login for:', email);
-    
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email and password required' },
@@ -22,17 +20,13 @@ export async function POST(request) {
       );
     }
     
-    // Find user with role
     const user = await prisma.user.findUnique({
       where: { email },
       include: { role: true }
     });
     
     if (!user) {
-      console.log('[LOGIN] User not found:', email);
-      
-      // Log security event for failed login (user not found)
-      await logSecurity({
+      await logSecurityEvent({
         userId: null,
         action: SecurityActions.LOGIN_FAILED,
         ipAddress,
@@ -47,13 +41,10 @@ export async function POST(request) {
       );
     }
     
-    // Check lockout
     if (user.lockoutUntil && user.lockoutUntil > new Date()) {
       const remainingSeconds = Math.ceil((user.lockoutUntil - new Date()) / 1000);
-      console.log('[LOGIN] Account locked:', remainingSeconds);
       
-      // Log security event for locked account attempt
-      await logSecurity({
+      await logSecurityEvent({
         userId: user.id,
         action: SecurityActions.LOGIN_FAILED,
         ipAddress,
@@ -62,17 +53,20 @@ export async function POST(request) {
         success: false
       });
       
+      // In your API route
       return NextResponse.json(
-        { error: `Account locked. Try again in ${remainingSeconds} seconds`, locked: true, lockoutTime: remainingSeconds },
-        { status: 429 }
+        { 
+          success: false, 
+          error: `Account locked. Try again in ${remainingSeconds} seconds`, 
+          locked: true, 
+          lockoutTime: remainingSeconds 
+        },
+        { status: 200 } // ← Return 200 instead of 429
       );
     }
     
-    // Check email verification
     if (!user.isVerified) {
-      console.log('[LOGIN] Email not verified:', email);
-      
-      await logSecurity({
+      await logSecurityEvent({
         userId: user.id,
         action: SecurityActions.LOGIN_FAILED,
         ipAddress,
@@ -87,15 +81,12 @@ export async function POST(request) {
       );
     }
     
-    // Verify password
     const isValid = await verifyPassword(password, user.passwordHash);
     
     if (!isValid) {
-      console.log('[LOGIN] Invalid password for:', email);
       const result = await handleFailedLogin(email, ipAddress, userAgent);
       
-      // Log security event for failed password
-      await logSecurity({
+      await logSecurityEvent({
         userId: user.id,
         action: SecurityActions.LOGIN_FAILED,
         ipAddress,
@@ -105,8 +96,7 @@ export async function POST(request) {
       });
       
       if (result.locked) {
-        // Log account lockout event
-        await logSecurity({
+        await logSecurityEvent({
           userId: user.id,
           action: SecurityActions.ACCOUNT_LOCKED,
           ipAddress,
@@ -116,8 +106,10 @@ export async function POST(request) {
         });
         
         return NextResponse.json(
-          { error: `Too many failed attempts. Account locked for ${result.lockoutTime} seconds`, locked: true, lockoutTime: result.lockoutTime },
-          { status: 429 }
+          { error: `Too many failed attempts. Account locked for ${result.lockoutTime} seconds`, 
+          locked: true, 
+          lockoutTime: result.lockoutTime },
+          { status: 200 }
         );
       }
       
@@ -127,22 +119,14 @@ export async function POST(request) {
       );
     }
     
-    // Reset failed attempts
     await resetFailedAttempts(email);
     
-    // ============================================================
     // TWO-FACTOR AUTHENTICATION CHECK
-    // ============================================================
-    
     if (user.twoFactorEnabled) {
-      console.log('[LOGIN] 2FA enabled for user:', email);
-      
-      // Generate OTP
       const otp = generateOtp();
-      storeOtp(user.id, otp);
+      await storeOtp(user.id, otp);
       
-      // Log security event for 2FA code sent
-      await logSecurity({
+      await logSecurityEvent({
         userId: user.id,
         action: SecurityActions.TWO_FACTOR_CODE_SENT,
         ipAddress,
@@ -151,11 +135,10 @@ export async function POST(request) {
         success: true
       });
       
-      // Send OTP email
       const emailSent = await send2faOtpEmail(user.email, otp, user.firstName);
       
       if (!emailSent) {
-        await logSecurity({
+        await logSecurityEvent({
           userId: user.id,
           action: SecurityActions.TWO_FACTOR_CODE_SENT,
           ipAddress,
@@ -170,7 +153,6 @@ export async function POST(request) {
         );
       }
       
-      // Check if device is trusted
       let isTrustedDevice = false;
       const deviceId = generateDeviceFingerprint(userAgent, ipAddress);
       
@@ -190,10 +172,9 @@ export async function POST(request) {
         });
       }
       
-      // Create temporary session for 2FA
       const tempSession = Buffer.from(JSON.stringify({
         userId: user.id,
-        expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes
+        expiresAt: Date.now() + 10 * 60 * 1000
       })).toString('base64');
       
       const isProduction = process.env.NODE_ENV === 'production';
@@ -225,15 +206,10 @@ export async function POST(request) {
       return twoFactorResponse;
     }
     
-    // ============================================================
     // NORMAL LOGIN (NO 2FA)
-    // ============================================================
-    
-    // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
     
-    // Determine redirect URL based on role and application status
     let redirectUrl = '/role-request';
     
     if (user.applicationStatus === 'APPROVED') {
@@ -245,15 +221,10 @@ export async function POST(request) {
         redirectUrl = '/dashboard/editor';
       } else if (user.role?.name === 'VIEWER') {
         redirectUrl = '/dashboard/viewer';
-      } else {
-        redirectUrl = '/role-request';
       }
     }
     
-    console.log('[LOGIN] Successful for:', email, 'Redirect:', redirectUrl);
-    
-    // Log security event for successful login
-    await logSecurity({
+    await logSecurityEvent({
       userId: user.id,
       action: SecurityActions.LOGIN_SUCCESS,
       ipAddress,
@@ -262,7 +233,6 @@ export async function POST(request) {
       success: true
     });
     
-    // Create audit log
     await createAuditLog({
       userId: user.id,
       action: 'LOGIN_SUCCESS',
@@ -273,12 +243,11 @@ export async function POST(request) {
       userAgent
     });
     
-    // Create response
     const response = NextResponse.json({
       success: true,
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-      redirectUrl: redirectUrl,
+      accessToken,
+      refreshToken,
+      redirectUrl,
       user: {
         id: user.id,
         email: user.email,
@@ -290,7 +259,6 @@ export async function POST(request) {
       }
     });
     
-    // Set cookies
     const isProduction = process.env.NODE_ENV === 'production';
     
     response.cookies.set('accessToken', accessToken, {

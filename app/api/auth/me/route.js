@@ -4,16 +4,12 @@ import { prisma } from '@/lib/prisma';
 
 export async function GET(request) {
   try {
-    // Try to get token from Authorization header first (localStorage)
     const authHeader = request.headers.get('Authorization');
     let token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
     
-    // Fallback to cookie
     if (!token) {
       token = request.cookies.get('accessToken')?.value;
     }
-    
-    console.log('[server] GET /api/auth/me - Token exists:', !!token);
     
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -34,7 +30,6 @@ export async function GET(request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // Return all user data including twoFactorEnabled
     return NextResponse.json({
       id: user.id,
       email: user.email,
@@ -42,8 +37,8 @@ export async function GET(request) {
       lastName: user.lastName,
       role: user.role,
       applicationStatus: user.applicationStatus,
-      twoFactorEnabled: user.twoFactorEnabled,  // ← ADD THIS LINE
-      isVerified: user.isVerified               // ← Also add this for completeness
+      twoFactorEnabled: user.twoFactorEnabled,
+      isVerified: user.isVerified
     });
     
   } catch (error) {

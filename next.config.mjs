@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true, // Enable SWC minification for better performance
   
   // Image optimization
   images: {
@@ -102,9 +101,9 @@ const nextConfig = {
     pagesBufferLength: 2,
   },
   
-  // Dev indicators (disable in production)
+  // Dev indicators - DISABLE COMPLETELY
   devIndicators: {
-    buildActivity: true,
+    buildActivity: false,
     buildActivityPosition: 'bottom-right',
   },
 };
