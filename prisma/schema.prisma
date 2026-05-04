@@ -17,11 +17,16 @@ model User {
   firstName         String
   lastName          String
   passwordHash      String
-  isVerified          Boolean   @default(false)
+  isVerified        Boolean   @default(false)
   verificationToken   String?   @unique
   verificationExpiry  DateTime?
+  
+  // Pending Email Verification fields
+  pendingEmail        String?   @unique
+  pendingEmailToken   String?   @unique
+  pendingEmailExpiry  DateTime?
 
-    // OTP for password change
+  // OTP for password change
   passwordChangeOtp     String?
   passwordChangeOtpExpiry DateTime?
   
@@ -31,12 +36,11 @@ model User {
 
   // 2FA Fields
   twoFactorEnabled       Boolean   @default(false)
-  twoFactorSecret        String?   // Encrypted secret for TOTP (future Google Authenticator)
-  twoFactorBackupCodes   String?   // JSON array of hashed backup codes
-
-   twoFactorOtp         String?
-  twoFactorOtpExpiry   DateTime?
-  twoFactorOtpAttempts Int       @default(0)
+  twoFactorSecret        String?
+  twoFactorBackupCodes   String?
+  twoFactorOtp           String?
+  twoFactorOtpExpiry     DateTime?
+  twoFactorOtpAttempts   Int       @default(0)
   
   // Trusted Devices
   trustedDevices         TrustedDevice[]
@@ -67,11 +71,8 @@ model User {
   
   // Audit Logs
   auditLogs         AuditLog[]
-
-    // Security Logs - ADD THIS LINE
   securityLogs      SecurityLog[]
-
-   roleApplicationRejections RoleApplicationRejection[]
+  roleApplicationRejections RoleApplicationRejection[]
   
   // Timestamps
   createdAt         DateTime  @default(now())

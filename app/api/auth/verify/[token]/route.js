@@ -9,43 +9,108 @@ export async function GET(request, { params }) {
     const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
     const userAgent = request.headers.get('user-agent') || 'unknown';
     
-    console.log('[VERIFY] ========================================');
-    console.log('[VERIFY] Token received:', token);
+    const baseUrl = process.env.NEXTAUTH_URL || 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
     
-    // Force the correct base URL
-    const baseUrl = 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
-    
-    console.log('[VERIFY] Using base URL:', baseUrl);
-    
-    const userWithToken = await prisma.user.findFirst({
+    // Check for regular email verification (new registration)
+    let userWithToken = await prisma.user.findFirst({
       where: {
         verificationToken: token,
         verificationExpiry: { gt: new Date() }
       }
     });
     
-    console.log('[VERIFY] User found:', userWithToken?.email || 'No user found');
-    
-    if (!userWithToken) {
-      console.log('[VERIFY] No user found, redirecting to error page');
-      
-      // Log security event for invalid verification attempt
-      await logSecurityEvent({
-        userId: null,
-        action: SecurityActions.EMAIL_VERIFICATION_FAILED,
-        ipAddress,
-        userAgent,
-        details: { reason: 'Invalid or expired token' },
-        success: false
+    if (userWithToken && !userWithToken.isVerified) {
+      // Regular email verification for new registration
+      await prisma.user.update({
+        where: { id: userWithToken.id },
+        data: {
+          isVerified: true,
+          verificationToken: null,
+          verificationExpiry: null
+        }
       });
       
-      return NextResponse.redirect(new URL('/verify/error?reason=invalid_token', baseUrl));
+      await logSecurityEvent({
+        userId: userWithToken.id,
+        action: SecurityActions.EMAIL_VERIFIED,
+        ipAddress,
+        userAgent,
+        details: { email: userWithToken.email, type: 'registration' },
+        success: true
+      });
+      
+      await createAuditLog({
+        userId: userWithToken.id,
+        action: AuditActions.EMAIL_VERIFIED,
+        resourceType: 'user',
+        resourceId: userWithToken.id,
+        details: { email: userWithToken.email },
+        ipAddress,
+        userAgent
+      });
+      
+      return NextResponse.redirect(new URL('/verify/success', baseUrl));
     }
     
-    if (userWithToken.isVerified) {
-      console.log('[VERIFY] User already verified');
+    // Check for pending email change verification
+    let userWithPendingEmail = await prisma.user.findFirst({
+      where: {
+        pendingEmailToken: token,
+        pendingEmailExpiry: { gt: new Date() }
+      }
+    });
+    
+    if (userWithPendingEmail && userWithPendingEmail.pendingEmail) {
+      const oldEmail = userWithPendingEmail.email;
+      const newEmail = userWithPendingEmail.pendingEmail;
       
-      // Log security event for already verified attempt
+      // Move pending email to primary email field
+      await prisma.user.update({
+        where: { id: userWithPendingEmail.id },
+        data: {
+          email: newEmail,
+          pendingEmail: null,
+          pendingEmailToken: null,
+          pendingEmailExpiry: null,
+          isVerified: true
+        }
+      });
+      
+      await logSecurityEvent({
+        userId: userWithPendingEmail.id,
+        action: SecurityActions.EMAIL_CHANGED,
+        ipAddress,
+        userAgent,
+        details: { oldEmail, newEmail, type: 'email_change' },
+        success: true
+      });
+      
+      await createAuditLog({
+        userId: userWithPendingEmail.id,
+        action: 'EMAIL_CHANGE_COMPLETED',
+        resourceType: 'user',
+        resourceId: userWithPendingEmail.id,
+        details: { oldEmail, newEmail },
+        ipAddress,
+        userAgent
+      });
+      
+      // Invalidate all sessions to force re-login with new email
+      await prisma.session.deleteMany({
+        where: { userId: userWithPendingEmail.id }
+      });
+      
+      return NextResponse.redirect(new URL('/verify/email-changed', baseUrl));
+    }
+    
+    // Check if user is already verified (for regular verification)
+    userWithToken = await prisma.user.findFirst({
+      where: {
+        verificationToken: token
+      }
+    });
+    
+    if (userWithToken && userWithToken.isVerified) {
       await logSecurityEvent({
         userId: userWithToken.id,
         action: SecurityActions.EMAIL_VERIFICATION_FAILED,
@@ -58,48 +123,21 @@ export async function GET(request, { params }) {
       return NextResponse.redirect(new URL('/verify/already-verified', baseUrl));
     }
     
-    // Update user as verified
-    await prisma.user.update({
-      where: { id: userWithToken.id },
-      data: {
-        isVerified: true,
-        verificationToken: null,
-        verificationExpiry: null
-      }
-    });
-    
-    console.log('[VERIFY] User verified successfully:', userWithToken.email);
-    
-    // Log security event for successful verification
+    // No valid token found
     await logSecurityEvent({
-      userId: userWithToken.id,
-      action: SecurityActions.EMAIL_VERIFIED,
+      userId: null,
+      action: SecurityActions.EMAIL_VERIFICATION_FAILED,
       ipAddress,
       userAgent,
-      details: { email: userWithToken.email },
-      success: true
+      details: { reason: 'Invalid or expired token' },
+      success: false
     });
     
-    // Create audit log
-    await createAuditLog({
-      userId: userWithToken.id,
-      action: AuditActions.EMAIL_VERIFIED,
-      resourceType: 'user',
-      resourceId: userWithToken.id,
-      details: { email: userWithToken.email },
-      ipAddress,
-      userAgent
-    });
-    
-    // Redirect to success page (NOT directly to login)
-    const successUrl = new URL('/verify/success', baseUrl);
-    console.log('[VERIFY] Redirecting to success page:', successUrl.toString());
-    
-    return NextResponse.redirect(successUrl);
+    return NextResponse.redirect(new URL('/verify/error?reason=invalid_token', baseUrl));
     
   } catch (error) {
     console.error('[VERIFY] Error:', error);
-    const baseUrl = 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
+    const baseUrl = process.env.NEXTAUTH_URL || 'https://shiny-garbanzo-5gpqjp5j95v5h7xjp-3000.app.github.dev';
     
     await logSecurityEvent({
       userId: null,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyAccessToken } from '@/lib/auth';
+import { verifyAccessToken, verifyPassword } from '@/lib/auth';
 import { createAuditLog } from '@/lib/audit';
 import { logSecurityEvent, SecurityActions } from '@/lib/security-log';
 import { sendVerificationEmail } from '@/lib/email/sendVerificationEmail';
@@ -8,9 +8,16 @@ import crypto from 'crypto';
 
 export async function PUT(request) {
   try {
-    const { firstName, lastName, email } = await request.json();
+    const { firstName, lastName, email, currentPassword } = await request.json();
     const ipAddress = request.headers.get('x-forwarded-for') || 'unknown';
     const userAgent = request.headers.get('user-agent') || 'unknown';
+    
+    // Validate required fields
+    if (!currentPassword) {
+      return NextResponse.json({ 
+        error: 'Current password is required to update profile' 
+      }, { status: 400 });
+    }
     
     let token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (!token) {
@@ -26,7 +33,6 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    // Get current user data
     const currentUser = await prisma.user.findUnique({
       where: { id: decoded.userId }
     });
@@ -35,11 +41,51 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // Check if email is being changed
-    const isEmailChanging = email && email !== currentUser.email;
+    // Re-authentication: Verify current password
+    const isPasswordValid = await verifyPassword(currentPassword, currentUser.passwordHash);
+    if (!isPasswordValid) {
+      await logSecurityEvent({
+        userId: decoded.userId,
+        action: SecurityActions.PROFILE_UPDATE_FAILED,
+        ipAddress,
+        userAgent,
+        details: { reason: 'Invalid password' },
+        success: false
+      });
+      
+      return NextResponse.json({ 
+        error: 'Current password is incorrect' 
+      }, { status: 401 });
+    }
     
-    // If email is changing, check if it's already taken
+    const isEmailChanging = email && email !== currentUser.email;
+    const isNameChanging = (firstName && firstName !== currentUser.firstName) || 
+                          (lastName && lastName !== currentUser.lastName);
+    
+    // Update name if changed
+    if (isNameChanging) {
+      await prisma.user.update({
+        where: { id: decoded.userId },
+        data: {
+          firstName: firstName || currentUser.firstName,
+          lastName: lastName || currentUser.lastName
+        }
+      });
+      
+      await createAuditLog({
+        userId: decoded.userId,
+        action: 'PROFILE_UPDATED',
+        resourceType: 'user',
+        resourceId: decoded.userId,
+        details: { firstName, lastName },
+        ipAddress,
+        userAgent
+      });
+    }
+    
+    // Handle email change with pending verification
     if (isEmailChanging) {
+      // Check if new email is already taken by another user
       const existingUser = await prisma.user.findFirst({
         where: {
           email,
@@ -56,25 +102,45 @@ export async function PUT(request) {
       if (!emailRegex.test(email)) {
         return NextResponse.json({ error: 'Please enter a valid email address' }, { status: 400 });
       }
-    }
-    
-    // Prepare update data
-    const updateData = {
-      firstName: firstName || currentUser.firstName,
-      lastName: lastName || currentUser.lastName,
-    };
-    
-    // If email is changing, set as unverified and generate verification token
-    if (isEmailChanging) {
+      
+      // Generate verification token for pending email
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       
-      updateData.email = email;
-      updateData.isVerified = false;
-      updateData.verificationToken = verificationToken;
-      updateData.verificationExpiry = verificationExpiry;
+      // Store pending email without changing primary email
+      await prisma.user.update({
+        where: { id: decoded.userId },
+        data: {
+          pendingEmail: email,
+          pendingEmailToken: verificationToken,
+          pendingEmailExpiry: verificationExpiry
+        }
+      });
       
-      // Log security event for email change request
+      // Send verification email to the NEW email address
+      const emailSent = await sendVerificationEmail(
+        email, 
+        verificationToken, 
+        firstName || currentUser.firstName,
+        'email-change'
+      );
+      
+      if (!emailSent) {
+        // Clear pending email if sending fails
+        await prisma.user.update({
+          where: { id: decoded.userId },
+          data: {
+            pendingEmail: null,
+            pendingEmailToken: null,
+            pendingEmailExpiry: null
+          }
+        });
+        
+        return NextResponse.json({ 
+          error: 'Failed to send verification email. Please try again.' 
+        }, { status: 500 });
+      }
+      
       await logSecurityEvent({
         userId: decoded.userId,
         action: SecurityActions.EMAIL_CHANGE_REQUESTED,
@@ -83,68 +149,39 @@ export async function PUT(request) {
         details: { 
           oldEmail: currentUser.email,
           newEmail: email,
-          requiresReVerification: true
+          requiresVerification: true
         },
         success: true
       });
       
-      // Send verification email to new email address
-      const emailSent = await sendVerificationEmail(email, verificationToken, firstName || currentUser.firstName);
+      await createAuditLog({
+        userId: decoded.userId,
+        action: 'EMAIL_CHANGE_REQUESTED',
+        resourceType: 'user',
+        resourceId: decoded.userId,
+        details: { oldEmail: currentUser.email, newEmail: email },
+        ipAddress,
+        userAgent
+      });
       
-      if (!emailSent) {
-        await logSecurityEvent({
-          userId: decoded.userId,
-          action: SecurityActions.EMAIL_CHANGE_REQUESTED,
-          ipAddress,
-          userAgent,
-          details: { 
-            oldEmail: currentUser.email,
-            newEmail: email,
-            reason: 'Email send failed'
-          },
-          success: false
-        });
-        
-        return NextResponse.json({ 
-          error: 'Failed to send verification email. Please try again.' 
-        }, { status: 500 });
-      }
-    }
-    
-    // Update user
-    const updatedUser = await prisma.user.update({
-      where: { id: decoded.userId },
-      data: updateData
-    });
-    
-    // Create audit log
-    await createAuditLog({
-      userId: decoded.userId,
-      action: isEmailChanging ? 'PROFILE_UPDATED_EMAIL_CHANGED' : 'PROFILE_UPDATED',
-      resourceType: 'user',
-      resourceId: decoded.userId,
-      details: { 
-        firstName, 
-        lastName, 
-        email: isEmailChanging ? email : undefined,
-        oldEmail: isEmailChanging ? currentUser.email : undefined
-      },
-      ipAddress,
-      userAgent
-    });
-    
-    // If email was changed, invalidate current session and require re-login
-    if (isEmailChanging) {
       return NextResponse.json({
         success: true,
         requiresVerification: true,
-        message: 'Profile updated. A verification link has been sent to your new email address. Please verify your email to continue using the account.'
+        message: 'A verification link has been sent to your new email address. Please verify it to complete the email change. Your current email remains active until verification.'
+      });
+    }
+    
+    // No email change, just name update
+    if (isNameChanging) {
+      return NextResponse.json({
+        success: true,
+        message: 'Profile updated successfully'
       });
     }
     
     return NextResponse.json({
       success: true,
-      message: 'Profile updated successfully'
+      message: 'No changes detected'
     });
     
   } catch (error) {

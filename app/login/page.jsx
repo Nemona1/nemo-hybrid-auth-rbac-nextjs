@@ -8,11 +8,11 @@ import { Mail, Lock, LogIn, Eye, EyeOff, Users, UserCog, FileText, Eye as EyeIco
 import ThemeToggle from '@/components/ui/ThemeToggle';
 
 const DEMO_ACCOUNTS = [
-  { role: 'Admin', email: 'nimonahirko@gmail.com', password: 'Nimo@9137l', icon: UserCog, color: 'bg-purple-600' },
+  { role: 'Admin', email: 'obsehirko2023@gmail.com', password: 'Nimo@9137l', icon: UserCog, color: 'bg-purple-600' },
   { role: 'Editor', email: 'editor@nemo-auth.com', password: 'Editor@123456', icon: FileText, color: 'bg-blue-600' },
   { role: 'Manager', email: 'manager@nemo-auth.com', password: 'Manager@123456', icon: Users, color: 'bg-green-600' },
   { role: 'Viewer', email: 'viewer@nemo-auth.com', password: 'Viewer@123456', icon: EyeIcon, color: 'bg-gray-600' },
-  { role: 'Pending', email: 'nimona2024hirko@gmail.com', password: 'Nimo@1234', icon: Clock, color: 'bg-yellow-600' },
+  { role: 'Pending', email: 'nemonahirko@gmail.com', password: 'Nimo@1234', icon: Clock, color: 'bg-yellow-600' },
 ];
 
 export default function LoginPage() {
