@@ -1,41 +1,83 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+.pnp.loader.mjs
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Build outputs
+.next/
+out/
+build/
+dist/
+.vercel/
 
-# testing
-/coverage
+# Environment files
+.env
+.env.local
+.env*.local
+.env.production
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
 
-# vercel
-.vercel
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
 
-# typescript
+# Package files
+*.tgz
+*.tar.gz
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# TypeScript
 *.tsbuildinfo
-next-env.d.ts
+
+# Next.js
+.next/
+out/
+build/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Local development
+.DS_Store
+*.log
+.env
+.env*.local
+
+# Package lock files (optional - keep if you want)
+# package-lock.json
+# yarn.lock
+
+# nemo-auth-package specific (the npm package)
+nemo-auth-package/node_modules/
+nemo-auth-package/dist/
+nemo-auth-package/.env
+nemo-auth-package/*.tgz
